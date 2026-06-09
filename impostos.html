@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Gestão JOGA — Impostos</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2338bdf8'/%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main class="main">
+  <div class="page-head"><div><h1>Impostos</h1><div class="sub">DAS-MEI e parâmetros tributários</div></div></div>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <h2 class="section-title" style="margin-top:0">Configuração</h2>
+      <div class="field"><label>Regime tributário</label>
+        <select id="p-regime"><option value="MEI">MEI</option><option value="ME-Simples">ME — Simples Nacional</option></select></div>
+      <div class="row2">
+        <div class="field"><label>Valor do DAS-MEI (R$/mês)</label><input type="number" id="p-das" step="0.01" min="0"></div>
+        <div class="field"><label>Dia de vencimento</label><input type="number" id="p-dia" min="1" max="28" value="20"></div>
+      </div>
+      <div class="field"><label>Alíquota Simples (% — futuro ME)</label><input type="number" id="p-aliq" step="0.001" min="0" placeholder="deixe vazio enquanto for MEI">
+        <div class="hint">Preparado para a virada ME. Enquanto for MEI, só o DAS fixo é usado.</div></div>
+      <button class="btn btn-primary" onclick="salvarParam()">Salvar configuração</button>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title" style="margin-top:0">Lançar DAS do mês</h2>
+      <p class="muted" style="font-size:0.85rem;margin-bottom:14px">Gera um lançamento de imposto + 1 parcela com vencimento no dia configurado. Não duplica se o mês já foi lançado.</p>
+      <div class="field"><label>Competência</label><input type="month" id="d-comp"></div>
+      <button class="btn btn-primary" onclick="lancarDas()">Lançar DAS</button>
+      <div id="das-info" class="hint" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Histórico de impostos</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Competência</th><th>Descrição</th><th>Status</th><th class="num">Valor</th></tr></thead>
+      <tbody id="hist"><tr><td colspan="4" class="empty">Carregando…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<script src="/static/app.js"></script>
+<script>
+renderShell('/impostos');
+
+async function carregarParam() {
+  try {
+    const { parametros: p } = await api('/api/parametros');
+    document.getElementById('p-regime').value = p.regime || 'MEI';
+    document.getElementById('p-das').value = p.das_mei_valor ?? '';
+    document.getElementById('p-dia').value = p.das_vencimento_dia ?? 20;
+    document.getElementById('p-aliq').value = p.aliquota_simples ?? '';
+    document.getElementById('das-info').textContent = p.das_mei_valor > 0
+      ? `DAS configurado: ${money(p.das_mei_valor)} · vence dia ${p.das_vencimento_dia}`
+      : '⚠ Configure o valor do DAS antes de lançar.';
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function salvarParam() {
+  try {
+    await api('/api/parametros', { method: 'PUT', body: {
+      regime: document.getElementById('p-regime').value,
+      das_mei_valor: document.getElementById('p-das').value || 0,
+      das_vencimento_dia: document.getElementById('p-dia').value || 20,
+      aliquota_simples: document.getElementById('p-aliq').value || null,
+    }});
+    toast('Configuração salva!', 'ok');
+    carregarParam();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function lancarDas() {
+  const comp = document.getElementById('d-comp').value; // YYYY-MM
+  try {
+    const r = await api('/api/impostos/das', { method: 'POST', body: comp ? { competencia: comp } : {} });
+    toast((r.descricao || 'DAS') + ' lançado!', 'ok');
+    carregarHist();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function carregarHist() {
+  try {
+    const { rows } = await api('/api/lancamentos?tipo=imposto');
+    const tb = document.getElementById('hist');
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="4" class="empty">Nenhum imposto lançado.</td></tr>'; return; }
+    tb.innerHTML = rows.map(l => `
+      <tr>
+        <td>${fmtDate(l.data_competencia)}</td>
+        <td>${escapeHtml(l.descricao)}</td>
+        <td>${l.parcelas_pagas >= l.qtd_parcelas ? '<span class="badge pago">pago</span>' : '<span class="badge previsto">em aberto</span>'}</td>
+        <td class="num">${money(l.valor_total)}</td>
+      </tr>`).join('');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+const now = new Date();
+document.getElementById('d-comp').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+carregarParam();
+carregarHist();
+</script>
+</body>
+</html>

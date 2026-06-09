@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Gestão JOGA — Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='1' stop-color='%23818cf8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='url(%23g)'/%3E%3Ctext x='16' y='22' font-family='DM Sans,sans-serif' font-size='18' font-weight='700' text-anchor='middle' fill='%230a0e17'%3EJ%3C/text%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<main class="main">
+  <div class="page-head">
+    <div>
+      <h1>Dashboard</h1>
+      <div class="sub">Visão geral do caixa e projeção</div>
+    </div>
+    <a class="btn" href="/api/export/lancamentos.csv">⬇ Exportar CSV</a>
+  </div>
+
+  <div class="grid cols-4" id="kpis">
+    <div class="card kpi"><div class="label">Saldo atual</div><div class="value" id="k-saldo">—</div><div class="hint">caixa + contas</div></div>
+    <div class="card kpi"><div class="label">A receber (30d)</div><div class="value pos" id="k-receber">—</div><div class="hint" id="k-receber-venc"></div></div>
+    <div class="card kpi"><div class="label">A pagar (30d)</div><div class="value neg" id="k-pagar">—</div><div class="hint" id="k-pagar-venc"></div></div>
+    <div class="card kpi"><div class="label">Resultado do mês</div><div class="value" id="k-resultado">—</div><div class="hint" id="k-resultado-hint"></div></div>
+  </div>
+
+  <h2 class="section-title">Fluxo de caixa projetado (12 meses)</h2>
+  <div class="card"><canvas id="chartFluxo" height="92"></canvas></div>
+
+  <h2 class="section-title">Próximos vencimentos</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Vencimento</th><th>Descrição</th><th>Tipo</th><th>Status</th><th class="num">Valor</th></tr></thead>
+      <tbody id="prox"><tr><td colspan="5" class="empty">Carregando…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<script src="/static/app.js"></script>
+<script>
+renderShell('/');
+
+async function carregar() {
+  try {
+    const { resumo: r } = await api('/api/dashboard/resumo');
+    document.getElementById('k-saldo').textContent = money(r.saldo_atual);
+    document.getElementById('k-saldo').className = 'value ' + (r.saldo_atual >= 0 ? 'pos' : 'neg');
+    document.getElementById('k-receber').textContent = money(r.a_receber_30);
+    document.getElementById('k-pagar').textContent = money(r.a_pagar_30);
+    document.getElementById('k-receber-venc').textContent = r.vencidos_receber > 0 ? `⚠ ${money(r.vencidos_receber)} vencidos` : 'em dia';
+    document.getElementById('k-pagar-venc').textContent = r.vencidos_pagar > 0 ? `⚠ ${money(r.vencidos_pagar)} vencidos` : 'em dia';
+    const res = document.getElementById('k-resultado');
+    res.textContent = money(r.resultado_mes);
+    res.className = 'value ' + (r.resultado_mes >= 0 ? 'pos' : 'neg');
+    document.getElementById('k-resultado-hint').textContent = `rec ${moneyShort(r.receita_mes)} · desp ${moneyShort(r.despesa_mes)}`;
+  } catch (e) { toast(e.message, 'err'); }
+
+  try {
+    const { rows } = await api('/api/dashboard/fluxo?meses=12');
+    desenharFluxo(rows);
+  } catch (e) { toast(e.message, 'err'); }
+
+  try {
+    const { rows } = await api('/api/parcelas?status=previsto');
+    const prox = rows.slice(0, 12);
+    const tb = document.getElementById('prox');
+    if (!prox.length) { tb.innerHTML = '<tr><td colspan="5" class="empty">Nenhuma parcela em aberto.</td></tr>'; return; }
+    tb.innerHTML = prox.map(p => `
+      <tr>
+        <td>${fmtDate(p.data_vencimento)}</td>
+        <td>${escapeHtml(p.descricao)}${p.contato_nome ? ' · <span class="muted">' + escapeHtml(p.contato_nome) + '</span>' : ''}</td>
+        <td><span class="badge ${p.lanc_tipo}">${p.lanc_tipo}</span></td>
+        <td><span class="badge ${p.status_efetivo}">${p.status_efetivo}</span></td>
+        <td class="num">${money(p.valor)}</td>
+      </tr>`).join('');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function desenharFluxo(rows) {
+  const ctx = document.getElementById('chartFluxo');
+  const labels = rows.map(r => fmtMesAno(r.mes));
+  new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        { type: 'bar', label: 'Entradas', data: rows.map(r => r.entradas), backgroundColor: 'rgba(52,211,153,0.65)', borderRadius: 4 },
+        { type: 'bar', label: 'Saídas', data: rows.map(r => -r.saidas), backgroundColor: 'rgba(248,113,113,0.6)', borderRadius: 4 },
+        { type: 'line', label: 'Saldo acumulado', data: rows.map(r => r.acumulado), borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.1)', borderWidth: 2, tension: 0.3, fill: true, pointRadius: 3 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: { legend: { labels: { color: '#94a3b8', font: { family: 'DM Sans' } } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${money(Math.abs(c.parsed.y))}` } } },
+      scales: {
+        x: { stacked: true, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.08)' } },
+        y: { ticks: { color: '#94a3b8', callback: v => moneyShort(v) }, grid: { color: 'rgba(148,163,184,0.08)' } },
+      }
+    }
+  });
+}
+
+carregar();
+</script>
+</body>
+</html>

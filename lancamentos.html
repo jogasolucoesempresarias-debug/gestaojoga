@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Gestão JOGA — Lançamentos</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2338bdf8'/%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main class="main">
+  <div class="page-head">
+    <div><h1>Lançamentos</h1><div class="sub">Receitas, despesas e impostos (competência)</div></div>
+    <button class="btn btn-primary" onclick="abrirNovo()">+ Novo lançamento</button>
+  </div>
+
+  <div class="filters">
+    <div class="field"><label>Tipo</label>
+      <select id="f-tipo"><option value="">Todos</option><option value="receita">Receita</option><option value="despesa">Despesa</option><option value="imposto">Imposto</option></select></div>
+    <div class="field"><label>De</label><input type="date" id="f-de"></div>
+    <div class="field"><label>Até</label><input type="date" id="f-ate"></div>
+    <div class="field"><label>Busca</label><input type="text" id="f-q" placeholder="descrição, contato, NF…"></div>
+    <button class="btn" onclick="carregar()">Filtrar</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Competência</th><th>Descrição</th><th>Categoria</th><th>Contato</th><th>NF</th><th>Parcelas</th><th class="num">Valor</th><th></th></tr></thead>
+      <tbody id="lista"><tr><td colspan="8" class="empty">Carregando…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<!-- Modal novo lançamento -->
+<div class="modal-bg" id="modal">
+  <div class="modal">
+    <h2>Novo lançamento</h2>
+    <form id="formLanc">
+      <div class="row3">
+        <div class="field"><label>Tipo *</label>
+          <select id="m-tipo" required><option value="receita">Receita</option><option value="despesa">Despesa</option><option value="imposto">Imposto</option></select></div>
+        <div class="field"><label>Valor total (R$) *</label><input type="number" id="m-valor" step="0.01" min="0.01" required></div>
+        <div class="field"><label>Competência *</label><input type="date" id="m-comp" required></div>
+      </div>
+      <div class="field"><label>Descrição *</label><input type="text" id="m-desc" required placeholder="Ex.: Projeto automação Cliente X"></div>
+      <div class="row2">
+        <div class="field"><label>Categoria</label><select id="m-cat"></select></div>
+        <div class="field"><label>Contato (cliente/fornecedor)</label><select id="m-contato"></select></div>
+      </div>
+      <div class="row3">
+        <div class="field"><label>Nº parcelas</label><input type="number" id="m-parcelas" value="1" min="1" max="60"></div>
+        <div class="field"><label>1º vencimento</label><input type="date" id="m-venc"></div>
+        <div class="field"><label>Conta padrão</label><select id="m-conta"></select></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Nº da NF (opcional)</label><input type="text" id="m-nf"></div>
+        <div class="field"><label>Forma de pagamento</label><input type="text" id="m-forma" placeholder="Pix, boleto, cartão…"></div>
+      </div>
+      <div class="field"><label>Observação da NF</label><textarea id="m-nfobs" rows="2"></textarea></div>
+      <div class="field"><label>Prévia das parcelas</label><div class="preview-parcelas" id="preview">—</div></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('modal')">Cancelar</button>
+        <button type="submit" class="btn btn-primary" id="btnSalvar">Salvar lançamento</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+<script>
+renderShell('/lancamentos');
+let CATS = [], CONTATOS = [], CONTAS = [];
+
+async function carregar() {
+  const p = new URLSearchParams();
+  const t = document.getElementById('f-tipo').value; if (t) p.set('tipo', t);
+  const de = document.getElementById('f-de').value; if (de) p.set('de', de);
+  const ate = document.getElementById('f-ate').value; if (ate) p.set('ate', ate);
+  const q = document.getElementById('f-q').value.trim(); if (q) p.set('q', q);
+  try {
+    const { rows } = await api('/api/lancamentos?' + p.toString());
+    const tb = document.getElementById('lista');
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="8" class="empty">Nenhum lançamento.</td></tr>'; return; }
+    tb.innerHTML = rows.map(l => `
+      <tr>
+        <td>${fmtDate(l.data_competencia)}</td>
+        <td>${escapeHtml(l.descricao)}</td>
+        <td>${l.categoria_nome ? '<span class="dot" style="background:' + (l.categoria_cor || '#38bdf8') + '"></span>' + escapeHtml(l.categoria_nome) : '<span class="muted">—</span>'}</td>
+        <td>${l.contato_nome ? escapeHtml(l.contato_nome) : '<span class="muted">—</span>'}</td>
+        <td>${l.num_nf ? escapeHtml(l.num_nf) : '<span class="muted">—</span>'}</td>
+        <td><span class="badge ${l.tipo}">${l.tipo}</span> ${l.parcelas_pagas}/${l.qtd_parcelas}</td>
+        <td class="num">${money(l.valor_total)}</td>
+        <td class="num"><button class="btn btn-sm btn-danger" onclick="excluir(${l.id})">excluir</button></td>
+      </tr>`).join('');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function carregarOpcoes() {
+  try {
+    const [c, ct, co] = await Promise.all([api('/api/categorias'), api('/api/contatos'), api('/api/contas')]);
+    CATS = c.rows; CONTATOS = ct.rows; CONTAS = co.rows;
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function popularSelects() {
+  const tipo = document.getElementById('m-tipo').value;
+  const catTipo = tipo === 'receita' ? 'receita' : 'despesa';
+  document.getElementById('m-cat').innerHTML = '<option value="">—</option>' +
+    CATS.filter(c => c.tipo === catTipo).map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
+  document.getElementById('m-contato').innerHTML = '<option value="">—</option>' +
+    CONTATOS.map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
+  document.getElementById('m-conta').innerHTML = '<option value="">—</option>' +
+    CONTAS.map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
+}
+
+function abrirNovo() {
+  document.getElementById('formLanc').reset();
+  document.getElementById('m-comp').value = hoje();
+  document.getElementById('m-venc').value = hoje();
+  document.getElementById('m-parcelas').value = 1;
+  popularSelects();
+  atualizarPreview();
+  openModal('modal');
+}
+
+function atualizarPreview() {
+  const total = parseFloat(document.getElementById('m-valor').value || '0');
+  const n = Math.max(1, parseInt(document.getElementById('m-parcelas').value || '1', 10));
+  const venc = document.getElementById('m-venc').value || hoje();
+  const box = document.getElementById('preview');
+  if (!total || total <= 0) { box.textContent = 'Informe o valor.'; return; }
+  const base = Math.round((total / n) * 100) / 100;
+  let linhas = '', soma = 0;
+  const [y, m, d] = venc.split('-').map(Number);
+  for (let i = 0; i < n; i++) {
+    let v = (i === n - 1) ? Math.round((total - base * (n - 1)) * 100) / 100 : base;
+    soma += v;
+    const dt = new Date(y, m - 1 + i, d);
+    linhas += `<div class="pl"><span>${i + 1}/${n} · ${dt.toLocaleDateString('pt-BR')}</span><span>${money(v)}</span></div>`;
+  }
+  box.innerHTML = linhas + `<div class="pl" style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px"><strong>Total</strong><strong>${money(soma)}</strong></div>`;
+}
+
+['m-valor', 'm-parcelas', 'm-venc'].forEach(id => document.getElementById(id).addEventListener('input', atualizarPreview));
+document.getElementById('m-tipo').addEventListener('change', popularSelects);
+
+document.getElementById('formLanc').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('btnSalvar');
+  btn.disabled = true; btn.textContent = 'Salvando…';
+  const payload = {
+    tipo: document.getElementById('m-tipo').value,
+    descricao: document.getElementById('m-desc').value,
+    valor_total: document.getElementById('m-valor').value,
+    data_competencia: document.getElementById('m-comp').value,
+    categoria_id: document.getElementById('m-cat').value || null,
+    contato_id: document.getElementById('m-contato').value || null,
+    num_parcelas: document.getElementById('m-parcelas').value,
+    primeiro_vencimento: document.getElementById('m-venc').value,
+    conta_id: document.getElementById('m-conta').value || null,
+    num_nf: document.getElementById('m-nf').value || null,
+    forma_pagamento: document.getElementById('m-forma').value || null,
+    nf_obs: document.getElementById('m-nfobs').value || null,
+  };
+  try {
+    await api('/api/lancamentos', { method: 'POST', body: payload });
+    toast('Lançamento criado!', 'ok');
+    closeModal('modal');
+    carregar();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false; btn.textContent = 'Salvar lançamento';
+});
+
+async function excluir(id) {
+  if (!confirm('Excluir este lançamento e todas as parcelas?')) return;
+  try { await api('/api/lancamentos/' + id, { method: 'DELETE' }); toast('Excluído.', 'ok'); carregar(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+carregarOpcoes();
+carregar();
+</script>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Gestão JOGA — Cadastros</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2338bdf8'/%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main class="main">
+  <div class="page-head"><div><h1>Cadastros</h1><div class="sub">Categorias, contatos e contas/caixa</div></div></div>
+
+  <div class="tabs">
+    <button class="active" data-tab="cat" onclick="setTab('cat', this)">Categorias</button>
+    <button data-tab="contato" onclick="setTab('contato', this)">Contatos</button>
+    <button data-tab="conta" onclick="setTab('conta', this)">Contas / Caixa</button>
+  </div>
+
+  <!-- Categorias -->
+  <section id="tab-cat">
+    <div class="card" style="margin-bottom:16px">
+      <div class="row3">
+        <div class="field"><label>Nome</label><input type="text" id="cat-nome"></div>
+        <div class="field"><label>Tipo</label><select id="cat-tipo"><option value="receita">Receita</option><option value="despesa">Despesa</option></select></div>
+        <div class="field"><label>Cor</label><input type="color" id="cat-cor" value="#38bdf8" style="height:42px;padding:4px"></div>
+      </div>
+      <button class="btn btn-primary" onclick="addCat()">+ Adicionar categoria</button>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Nome</th><th>Tipo</th><th>Cor</th><th></th></tr></thead>
+      <tbody id="lista-cat"></tbody></table></div>
+  </section>
+
+  <!-- Contatos -->
+  <section id="tab-contato" style="display:none">
+    <div class="card" style="margin-bottom:16px">
+      <div class="row3">
+        <div class="field"><label>Nome *</label><input type="text" id="ct-nome"></div>
+        <div class="field"><label>Tipo</label><select id="ct-tipo"><option value="cliente">Cliente</option><option value="fornecedor">Fornecedor</option><option value="ambos">Ambos</option></select></div>
+        <div class="field"><label>CNPJ/CPF</label><input type="text" id="ct-doc"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>E-mail</label><input type="email" id="ct-email"></div>
+        <div class="field"><label>Telefone</label><input type="text" id="ct-tel"></div>
+      </div>
+      <button class="btn btn-primary" onclick="addContato()">+ Adicionar contato</button>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Nome</th><th>Tipo</th><th>Documento</th><th>Contato</th><th></th></tr></thead>
+      <tbody id="lista-contato"></tbody></table></div>
+  </section>
+
+  <!-- Contas -->
+  <section id="tab-conta" style="display:none">
+    <div class="card" style="margin-bottom:16px">
+      <div class="row2">
+        <div class="field"><label>Nome da conta *</label><input type="text" id="co-nome" placeholder="Ex.: Conta PJ Banco X"></div>
+        <div class="field"><label>Saldo inicial (R$)</label><input type="number" id="co-saldo" step="0.01" value="0"></div>
+      </div>
+      <button class="btn btn-primary" onclick="addConta()">+ Adicionar conta</button>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Conta</th><th class="num">Saldo inicial</th><th class="num">Saldo atual</th><th></th></tr></thead>
+      <tbody id="lista-conta"></tbody></table></div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+<script>
+renderShell('/cadastros');
+
+function setTab(t, btn) {
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['cat', 'contato', 'conta'].forEach(x => document.getElementById('tab-' + x).style.display = x === t ? '' : 'none');
+}
+
+// ── Categorias ──
+async function loadCat() {
+  const { rows } = await api('/api/categorias');
+  document.getElementById('lista-cat').innerHTML = rows.map(c => `
+    <tr><td>${escapeHtml(c.nome)}</td><td><span class="badge ${c.tipo}">${c.tipo}</span></td>
+    <td><span class="dot" style="background:${c.cor}"></span>${c.cor}</td>
+    <td class="num"><button class="btn btn-sm btn-danger" onclick="delItem('categorias',${c.id},loadCat)">excluir</button></td></tr>`).join('')
+    || '<tr><td colspan="4" class="empty">Nenhuma categoria.</td></tr>';
+}
+async function addCat() {
+  const nome = document.getElementById('cat-nome').value.trim();
+  if (!nome) return toast('Informe o nome.', 'err');
+  try {
+    await api('/api/categorias', { method: 'POST', body: {
+      nome, tipo: document.getElementById('cat-tipo').value, cor: document.getElementById('cat-cor').value }});
+    document.getElementById('cat-nome').value = '';
+    toast('Categoria criada!', 'ok'); loadCat();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── Contatos ──
+async function loadContato() {
+  const { rows } = await api('/api/contatos');
+  document.getElementById('lista-contato').innerHTML = rows.map(c => `
+    <tr><td>${escapeHtml(c.nome)}</td><td><span class="badge previsto">${c.tipo}</span></td>
+    <td>${c.documento ? escapeHtml(c.documento) : '<span class="muted">—</span>'}</td>
+    <td>${[c.email, c.telefone].filter(Boolean).map(escapeHtml).join(' · ') || '<span class="muted">—</span>'}</td>
+    <td class="num"><button class="btn btn-sm btn-danger" onclick="delItem('contatos',${c.id},loadContato)">excluir</button></td></tr>`).join('')
+    || '<tr><td colspan="5" class="empty">Nenhum contato.</td></tr>';
+}
+async function addContato() {
+  const nome = document.getElementById('ct-nome').value.trim();
+  if (!nome) return toast('Informe o nome.', 'err');
+  try {
+    await api('/api/contatos', { method: 'POST', body: {
+      nome, tipo: document.getElementById('ct-tipo').value, documento: document.getElementById('ct-doc').value,
+      email: document.getElementById('ct-email').value, telefone: document.getElementById('ct-tel').value }});
+    ['ct-nome', 'ct-doc', 'ct-email', 'ct-tel'].forEach(id => document.getElementById(id).value = '');
+    toast('Contato criado!', 'ok'); loadContato();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── Contas ──
+async function loadConta() {
+  const { rows } = await api('/api/contas');
+  document.getElementById('lista-conta').innerHTML = rows.map(c => `
+    <tr><td>${escapeHtml(c.nome)}</td><td class="num">${money(c.saldo_inicial)}</td>
+    <td class="num"><strong>${money(c.saldo_atual)}</strong></td>
+    <td class="num"><button class="btn btn-sm btn-danger" onclick="delItem('contas',${c.id},loadConta)">excluir</button></td></tr>`).join('')
+    || '<tr><td colspan="4" class="empty">Nenhuma conta.</td></tr>';
+}
+async function addConta() {
+  const nome = document.getElementById('co-nome').value.trim();
+  if (!nome) return toast('Informe o nome.', 'err');
+  try {
+    await api('/api/contas', { method: 'POST', body: {
+      nome, saldo_inicial: document.getElementById('co-saldo').value || 0 }});
+    document.getElementById('co-nome').value = ''; document.getElementById('co-saldo').value = 0;
+    toast('Conta criada!', 'ok'); loadConta();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function delItem(recurso, id, reload) {
+  if (!confirm('Excluir este item? (fica inativo, sem afetar histórico)')) return;
+  try { await api('/api/' + recurso + '/' + id, { method: 'DELETE' }); toast('Excluído.', 'ok'); reload(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+loadCat(); loadContato(); loadConta();
+</script>
+</body>
+</html>

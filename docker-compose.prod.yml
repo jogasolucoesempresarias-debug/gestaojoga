@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  gestaojoga-app:
+    image: ghcr.io/jogasolucoesempresarias-debug/gestaojoga:latest
+    networks:
+      - proxy
+      - gestaojoga-internal
+    environment:
+      TZ: America/Sao_Paulo
+      SECRET_KEY: ${SECRET_KEY}
+      DB_HOST: postgres_postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-gestao_joga}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      SEED_SENHA_INICIAL: ${SEED_SENHA_INICIAL:-joga123}
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=proxy"
+        - "traefik.http.routers.gestaojoga.rule=Host(`gestao.jogasolucoes.com.br`)"
+        - "traefik.http.routers.gestaojoga.entrypoints=websecure"
+        - "traefik.http.routers.gestaojoga.tls.certresolver=le"
+        - "traefik.http.services.gestaojoga.loadbalancer.server.port=5000"
+
+networks:
+  proxy:
+    external: true
+  gestaojoga-internal:
+    driver: overlay

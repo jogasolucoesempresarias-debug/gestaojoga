@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gestaojoga_postgres_dev
+    environment:
+      POSTGRES_DB: gestao_joga
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 240316
+    ports:
+      - "5432:5432"
+    volumes:
+      - gestaojoga_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  gestaojoga_pgdata:

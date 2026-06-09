@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Gestão JOGA — A pagar / receber</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2338bdf8'/%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main class="main">
+  <div class="page-head"><div><h1>A pagar / receber</h1><div class="sub">Parcelas por vencimento (caixa)</div></div></div>
+
+  <div class="tabs">
+    <button class="active" data-dir="receber" onclick="setDir('receber', this)">↑ A receber</button>
+    <button data-dir="pagar" onclick="setDir('pagar', this)">↓ A pagar</button>
+  </div>
+
+  <div class="grid cols-3" style="margin-bottom:18px">
+    <div class="card kpi"><div class="label">Em aberto (total)</div><div class="value" id="t-aberto">—</div></div>
+    <div class="card kpi"><div class="label">Vencidos</div><div class="value neg" id="t-vencidos">—</div></div>
+    <div class="card kpi"><div class="label">Pagos/recebidos</div><div class="value pos" id="t-pago">—</div></div>
+  </div>
+
+  <div class="filters">
+    <div class="field"><label>Status</label>
+      <select id="f-status"><option value="">Todos</option><option value="previsto">Previsto</option><option value="atrasado">Atrasado</option><option value="pago">Liquidado</option><option value="cancelado">Cancelado</option></select></div>
+    <div class="field"><label>De (venc.)</label><input type="date" id="f-de"></div>
+    <div class="field"><label>Até (venc.)</label><input type="date" id="f-ate"></div>
+    <button class="btn" onclick="carregar()">Filtrar</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Vencimento</th><th>Descrição</th><th>Contato</th><th>Parcela</th><th>Status</th><th class="num">Valor</th><th></th></tr></thead>
+      <tbody id="lista"><tr><td colspan="7" class="empty">Carregando…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<!-- Modal pagar -->
+<div class="modal-bg" id="modalPagar">
+  <div class="modal" style="max-width:440px">
+    <h2 id="pg-titulo">Liquidar parcela</h2>
+    <input type="hidden" id="pg-id">
+    <div class="field"><label>Data do pagamento</label><input type="date" id="pg-data"></div>
+    <div class="field"><label>Conta / caixa</label><select id="pg-conta"></select></div>
+    <div class="field"><label>Forma de pagamento</label><input type="text" id="pg-forma" placeholder="Pix, boleto…"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalPagar')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarPagar()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+<script>
+renderShell('/contas');
+let DIR = 'receber', CONTAS = [];
+
+function setDir(d, btn) {
+  DIR = d;
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  carregar();
+}
+
+async function carregar() {
+  const p = new URLSearchParams({ direcao: DIR });
+  const st = document.getElementById('f-status').value; if (st) p.set('status', st);
+  const de = document.getElementById('f-de').value; if (de) p.set('de', de);
+  const ate = document.getElementById('f-ate').value; if (ate) p.set('ate', ate);
+  try {
+    const { rows } = await api('/api/parcelas?' + p.toString());
+    let aberto = 0, vencidos = 0, pago = 0;
+    rows.forEach(r => {
+      if (r.status_efetivo === 'pago') pago += Number(r.valor);
+      else if (r.status_efetivo === 'cancelado') { /* ignora */ }
+      else { aberto += Number(r.valor); if (r.status_efetivo === 'atrasado') vencidos += Number(r.valor); }
+    });
+    document.getElementById('t-aberto').textContent = money(aberto);
+    document.getElementById('t-vencidos').textContent = money(vencidos);
+    document.getElementById('t-pago').textContent = money(pago);
+    const verbo = DIR === 'receber' ? 'Receber' : 'Pagar';
+
+    const tb = document.getElementById('lista');
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="7" class="empty">Nenhuma parcela.</td></tr>'; return; }
+    tb.innerHTML = rows.map(r => `
+      <tr>
+        <td>${fmtDate(r.data_vencimento)}</td>
+        <td>${escapeHtml(r.descricao)}${r.num_nf ? ' <span class="muted">NF ' + escapeHtml(r.num_nf) + '</span>' : ''}</td>
+        <td>${r.contato_nome ? escapeHtml(r.contato_nome) : '<span class="muted">—</span>'}</td>
+        <td>${r.numero}</td>
+        <td><span class="badge ${r.status_efetivo}">${r.status_efetivo}</span>${r.data_pagamento ? ' <span class="muted">' + fmtDate(r.data_pagamento) + '</span>' : ''}</td>
+        <td class="num">${money(r.valor)}</td>
+        <td class="num">${r.status === 'pago'
+          ? `<button class="btn btn-sm btn-ghost" onclick="estornar(${r.id})">estornar</button>`
+          : `<button class="btn btn-sm btn-primary" onclick="abrirPagar(${r.id}, '${verbo}')">${verbo}</button>`}</td>
+      </tr>`).join('');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function abrirPagar(id, verbo) {
+  document.getElementById('pg-id').value = id;
+  document.getElementById('pg-titulo').textContent = verbo + ' parcela';
+  document.getElementById('pg-data').value = hoje();
+  document.getElementById('pg-conta').innerHTML = '<option value="">—</option>' +
+    CONTAS.map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
+  document.getElementById('pg-forma').value = '';
+  openModal('modalPagar');
+}
+
+async function confirmarPagar() {
+  const id = document.getElementById('pg-id').value;
+  try {
+    await api('/api/parcelas/' + id + '/pagar', { method: 'POST', body: {
+      data_pagamento: document.getElementById('pg-data').value,
+      conta_id: document.getElementById('pg-conta').value || null,
+      forma_pagamento: document.getElementById('pg-forma').value || null,
+    }});
+    toast('Parcela liquidada!', 'ok');
+    closeModal('modalPagar');
+    carregar();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function estornar(id) {
+  if (!confirm('Estornar este pagamento? A parcela volta para previsto.')) return;
+  try { await api('/api/parcelas/' + id + '/estornar', { method: 'POST' }); toast('Estornado.', 'ok'); carregar(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+api('/api/contas').then(j => { CONTAS = j.rows; }).catch(() => {});
+carregar();
+</script>
+</body>
+</html>

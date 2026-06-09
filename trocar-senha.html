@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Gestão JOGA — Trocar senha</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='1' stop-color='%23818cf8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='url(%23g)'/%3E%3Ctext x='16' y='22' font-family='DM Sans,sans-serif' font-size='18' font-weight='700' text-anchor='middle' fill='%230a0e17'%3EJ%3C/text%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e17; --surface: #111827; --surface2: #1a2235; --border: #1e293b;
+    --text: #e2e8f0; --text-dim: #94a3b8; --accent: #38bdf8; --accent2: #818cf8;
+    --red: #f87171; --green: #34d399; --yellow: #fbbf24;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 36px 32px; width: 100%; max-width: 420px; box-shadow: 0 20px 60px rgba(0,0,0,0.4); animation: fadeUp 0.4s ease; }
+  .logo { width: 52px; height: 52px; border-radius: 12px; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 1.6rem; font-weight: 700; color: var(--bg); margin: 0 auto 18px; }
+  h1 { font-size: 1.3rem; font-weight: 700; text-align: center; margin-bottom: 4px; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .subtitle { text-align: center; color: var(--text-dim); font-size: 0.82rem; margin-bottom: 22px; }
+  .aviso { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: var(--yellow); padding: 10px 12px; border-radius: 8px; font-size: 0.78rem; margin-bottom: 18px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 0.72rem; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+  .field input { width: 100%; padding: 10px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: inherit; font-size: 0.9rem; }
+  .field input:focus { outline: none; border-color: var(--accent); }
+  .btn-primary { width: 100%; padding: 11px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: var(--bg); font-weight: 700; border: none; border-radius: 8px; cursor: pointer; font-size: 0.92rem; font-family: inherit; margin-top: 8px; }
+  .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+  .erro { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--red); padding: 9px 12px; border-radius: 8px; font-size: 0.82rem; margin-bottom: 14px; display: none; }
+  .ok { background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.3); color: var(--green); padding: 9px 12px; border-radius: 8px; font-size: 0.82rem; margin-bottom: 14px; display: none; }
+  .show { display: block; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">J</div>
+    <h1>Trocar senha</h1>
+    <p class="subtitle">Primeira vez no sistema</p>
+    <div class="aviso">Por segurança, defina uma nova senha agora. Mínimo 6 caracteres.</div>
+    <div id="erro" class="erro"></div>
+    <div id="ok" class="ok"></div>
+    <form id="trocaForm">
+      <div class="field">
+        <label for="nova">Nova senha</label>
+        <input type="password" id="nova" required minlength="6" autofocus autocomplete="new-password">
+      </div>
+      <div class="field">
+        <label for="confirma">Confirme a nova senha</label>
+        <input type="password" id="confirma" required minlength="6" autocomplete="new-password">
+      </div>
+      <button type="submit" class="btn-primary" id="btn">Salvar nova senha</button>
+    </form>
+  </div>
+<script>
+  const form = document.getElementById('trocaForm');
+  const erro = document.getElementById('erro');
+  const ok = document.getElementById('ok');
+  const btn = document.getElementById('btn');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    erro.classList.remove('show'); ok.classList.remove('show');
+    const nova = document.getElementById('nova').value;
+    const confirma = document.getElementById('confirma').value;
+    if (nova !== confirma) { erro.textContent = 'A confirmação não bate.'; erro.classList.add('show'); return; }
+    btn.disabled = true; btn.textContent = 'Salvando...';
+    try {
+      const r = await fetch('/api/trocar-senha', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ nova, confirma })
+      });
+      const j = await r.json();
+      if (j.ok) { ok.textContent = 'Senha alterada! Redirecionando...'; ok.classList.add('show'); setTimeout(() => window.location.href = j.redirect || '/', 800); }
+      else { erro.textContent = j.error || 'Erro ao trocar senha'; erro.classList.add('show'); btn.disabled = false; btn.textContent = 'Salvar nova senha'; }
+    } catch (err) {
+      erro.textContent = 'Erro de conexão.'; erro.classList.add('show'); btn.disabled = false; btn.textContent = 'Salvar nova senha';
+    }
+  });
+</script>
+</body>
+</html>
