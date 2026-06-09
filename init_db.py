@@ -121,6 +121,30 @@ cur.execute("""
     );
 """)
 
+# ── Contratos / Recorrências (receita ou despesa fixa mensal) ─────────
+cur.execute("""
+    CREATE TABLE IF NOT EXISTS contratos (
+        id              SERIAL PRIMARY KEY,
+        contato_id      INTEGER REFERENCES contatos(id) ON DELETE SET NULL,
+        descricao       VARCHAR(255) NOT NULL,
+        tipo            VARCHAR(10) NOT NULL CHECK (tipo IN ('receita', 'despesa')),
+        categoria_id    INTEGER REFERENCES categorias(id) ON DELETE SET NULL,
+        valor_mensal    NUMERIC(14,2) NOT NULL,
+        dia_vencimento  INTEGER DEFAULT 10,
+        data_inicio     DATE NOT NULL,
+        data_fim        DATE,                          -- NULL = indefinido
+        status          VARCHAR(12) DEFAULT 'ativo'
+                        CHECK (status IN ('ativo', 'pausado', 'cancelado')),
+        criado_por      INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+        criado_em       TIMESTAMP DEFAULT NOW()
+    );
+""")
+cur.execute("CREATE INDEX IF NOT EXISTS ix_contratos_status ON contratos(status);")
+
+# Liga o lançamento gerado ao contrato de origem (rastreio, dedup e MRR)
+cur.execute("ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS contrato_id INTEGER REFERENCES contratos(id) ON DELETE SET NULL;")
+cur.execute("CREATE INDEX IF NOT EXISTS ix_lanc_contrato ON lancamentos(contrato_id);")
+
 # ── Seeds ─────────────────────────────────────────────────────────────
 
 # Linha única de parâmetros

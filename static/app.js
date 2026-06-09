@@ -58,6 +58,7 @@ const NAV_ITEMS = [
   { href: '/',            ico: '◧', label: 'Dashboard' },
   { href: '/lancamentos', ico: '✎', label: 'Lançamentos' },
   { href: '/contas',      ico: '↹', label: 'A pagar / receber' },
+  { href: '/recorrencias', ico: '↻', label: 'Recorrências' },
   { href: '/impostos',    ico: '%', label: 'Impostos' },
   { href: '/cadastros',   ico: '⚙', label: 'Cadastros' },
 ];
@@ -85,3 +86,73 @@ function renderShell(active) {
 // ── Modal helpers ──
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ── Cadastro inline de cliente (resolve "cadastrar na hora de fechar") ──
+// Mini-modal no tema dark, reutilizável em qualquer página que tenha um <select> de cliente.
+let _clienteTargetSelect = null;
+
+function _ensureClienteModal() {
+  if (document.getElementById('modalNovoCliente')) return;
+  const div = document.createElement('div');
+  div.className = 'modal-bg';
+  div.id = 'modalNovoCliente';
+  div.innerHTML = `
+    <div class="modal" style="max-width:480px">
+      <h2>Novo cliente</h2>
+      <form id="formNovoCliente">
+        <div class="row2">
+          <div class="field"><label>Nome *</label><input type="text" id="nc-nome" required></div>
+          <div class="field"><label>Tipo</label>
+            <select id="nc-tipo">
+              <option value="cliente">Cliente</option>
+              <option value="fornecedor">Fornecedor</option>
+              <option value="ambos">Ambos</option>
+            </select></div>
+        </div>
+        <div class="field"><label>CNPJ / CPF</label><input type="text" id="nc-doc"></div>
+        <div class="row2">
+          <div class="field"><label>E-mail</label><input type="email" id="nc-email"></div>
+          <div class="field"><label>Telefone</label><input type="text" id="nc-tel"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" onclick="closeModal('modalNovoCliente')">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="nc-salvar">Salvar cliente</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(div);
+
+  document.getElementById('formNovoCliente').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const nome = document.getElementById('nc-nome').value.trim();
+    if (!nome) { toast('Informe o nome.', 'err'); return; }
+    const btn = document.getElementById('nc-salvar');
+    btn.disabled = true; btn.textContent = 'Salvando…';
+    try {
+      const j = await api('/api/contatos', { method: 'POST', body: {
+        nome,
+        tipo: document.getElementById('nc-tipo').value,
+        documento: document.getElementById('nc-doc').value || null,
+        email: document.getElementById('nc-email').value || null,
+        telefone: document.getElementById('nc-tel').value || null,
+      }});
+      if (_clienteTargetSelect) {
+        const o = document.createElement('option');
+        o.value = j.row.id; o.textContent = j.row.nome;
+        _clienteTargetSelect.appendChild(o);
+        _clienteTargetSelect.value = j.row.id;
+      }
+      closeModal('modalNovoCliente');
+      toast('Cliente cadastrado!', 'ok');
+    } catch (err) { toast(err.message, 'err'); }
+    btn.disabled = false; btn.textContent = 'Salvar cliente';
+  });
+}
+
+function novoContatoInline(selectEl) {
+  _ensureClienteModal();
+  _clienteTargetSelect = selectEl;
+  document.getElementById('formNovoCliente').reset();
+  openModal('modalNovoCliente');
+  setTimeout(() => document.getElementById('nc-nome').focus(), 50);
+}

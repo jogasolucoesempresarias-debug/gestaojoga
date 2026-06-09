@@ -26,7 +26,7 @@
 
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Competência</th><th>Descrição</th><th>Categoria</th><th>Contato</th><th>NF</th><th>Parcelas</th><th class="num">Valor</th><th></th></tr></thead>
+      <thead><tr><th>Competência</th><th>Descrição</th><th>Categoria</th><th>Cliente</th><th>NF</th><th>Parcelas</th><th class="num">Valor</th><th></th></tr></thead>
       <tbody id="lista"><tr><td colspan="8" class="empty">Carregando…</td></tr></tbody>
     </table>
   </div>
@@ -46,7 +46,11 @@
       <div class="field"><label>Descrição *</label><input type="text" id="m-desc" required placeholder="Ex.: Projeto automação Cliente X"></div>
       <div class="row2">
         <div class="field"><label>Categoria</label><select id="m-cat"></select></div>
-        <div class="field"><label>Contato (cliente/fornecedor)</label><select id="m-contato"></select></div>
+        <div class="field"><label>Cliente / Fornecedor</label>
+          <div style="display:flex;gap:6px">
+            <select id="m-contato" style="flex:1"></select>
+            <button type="button" class="btn btn-sm" onclick="novoContatoInline(document.getElementById('m-contato'))" title="Cadastrar cliente na hora">+ novo</button>
+          </div></div>
       </div>
       <div class="row3">
         <div class="field"><label>Nº parcelas</label><input type="number" id="m-parcelas" value="1" min="1" max="60"></div>

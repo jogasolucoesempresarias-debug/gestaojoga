@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Gestão JOGA — Recorrências</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2338bdf8'/%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main class="main">
+  <div class="page-head">
+    <div><h1>Recorrências</h1><div class="sub">Contratos de receita e custos fixos mensais (MRR)</div></div>
+    <div style="display:flex;gap:8px;align-items:flex-end">
+      <div class="field" style="margin:0"><label>Gerar competência</label><input type="month" id="g-comp"></div>
+      <button class="btn" onclick="gerarMes()">↻ Gerar recorrências do mês</button>
+      <button class="btn btn-primary" onclick="abrirNovo()">+ Novo contrato</button>
+    </div>
+  </div>
+
+  <div class="grid cols-3" style="margin-bottom:18px">
+    <div class="card kpi"><div class="label">MRR (receita)</div><div class="value pos" id="k-rec">—</div></div>
+    <div class="card kpi"><div class="label">Custo fixo (mês)</div><div class="value neg" id="k-desp">—</div></div>
+    <div class="card kpi"><div class="label">MRR líquido</div><div class="value" id="k-liq">—</div><div class="hint" id="k-arr"></div></div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Descrição</th><th>Cliente/Fornecedor</th><th>Tipo</th><th>Dia</th><th>Vigência</th><th>Status</th><th>Mês atual</th><th class="num">Valor/mês</th><th></th></tr></thead>
+      <tbody id="lista"><tr><td colspan="9" class="empty">Carregando…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<!-- Modal novo contrato -->
+<div class="modal-bg" id="modal">
+  <div class="modal">
+    <h2>Novo contrato recorrente</h2>
+    <form id="formCtr">
+      <div class="row3">
+        <div class="field"><label>Tipo *</label>
+          <select id="c-tipo" required><option value="receita">Receita</option><option value="despesa">Despesa (custo fixo)</option></select></div>
+        <div class="field"><label>Valor mensal (R$) *</label><input type="number" id="c-valor" step="0.01" min="0.01" required></div>
+        <div class="field"><label>Dia de vencimento</label><input type="number" id="c-dia" min="1" max="28" value="10"></div>
+      </div>
+      <div class="field"><label>Descrição *</label><input type="text" id="c-desc" required placeholder="Ex.: Sustentação de automação — Cliente X"></div>
+      <div class="row2">
+        <div class="field"><label>Cliente</label>
+          <div style="display:flex;gap:6px">
+            <select id="c-contato" style="flex:1"></select>
+            <button type="button" class="btn btn-sm" onclick="novoContatoInline(document.getElementById('c-contato'))">+ novo</button>
+          </div></div>
+        <div class="field"><label>Categoria</label><select id="c-cat"></select></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Início *</label><input type="date" id="c-inicio" required></div>
+        <div class="field"><label>Fim (vazio = indefinido)</label><input type="date" id="c-fim"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('modal')">Cancelar</button>
+        <button type="submit" class="btn btn-primary" id="btnSalvar">Salvar contrato</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+<script>
+renderShell('/recorrencias');
+let CATS = [], CONTATOS = [];
+
+async function carregarOpcoes() {
+  try {
+    const [c, ct] = await Promise.all([api('/api/categorias'), api('/api/contatos')]);
+    CATS = c.rows; CONTATOS = ct.rows;
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function popularSelects() {
+  const tipo = document.getElementById('c-tipo').value;
+  document.getElementById('c-cat').innerHTML = '<option value="">—</option>' +
+    CATS.filter(c => c.tipo === tipo).map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
+  document.getElementById('c-contato').innerHTML = '<option value="">—</option>' +
+    CONTATOS.map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
+}
+document.getElementById('c-tipo').addEventListener('change', popularSelects);
+
+async function carregar() {
+  try {
+    const { resumo: r } = await api('/api/dashboard/resumo');
+    document.getElementById('k-rec').textContent = money(r.mrr_receita || 0);
+    document.getElementById('k-desp').textContent = money(r.mrr_despesa || 0);
+    const liq = document.getElementById('k-liq');
+    liq.textContent = money(r.mrr_liquido || 0);
+    liq.className = 'value ' + ((r.mrr_liquido || 0) >= 0 ? 'pos' : 'neg');
+    document.getElementById('k-arr').textContent = `ARR ${moneyShort((r.mrr_liquido || 0) * 12)}`;
+  } catch (e) { /* silencioso */ }
+
+  try {
+    const { rows } = await api('/api/contratos');
+    const tb = document.getElementById('lista');
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="9" class="empty">Nenhum contrato. Crie o primeiro contrato recorrente.</td></tr>'; return; }
+    tb.innerHTML = rows.map(c => `
+      <tr>
+        <td>${escapeHtml(c.descricao)}</td>
+        <td>${c.contato_nome ? escapeHtml(c.contato_nome) : '<span class="muted">—</span>'}</td>
+        <td><span class="badge ${c.tipo}">${c.tipo}</span></td>
+        <td>${c.dia_vencimento}</td>
+        <td>${fmtDate(c.data_inicio)} → ${c.data_fim ? fmtDate(c.data_fim) : '<span class="muted">indef.</span>'}</td>
+        <td><span class="badge ${c.status === 'ativo' ? 'pago' : (c.status === 'pausado' ? 'previsto' : 'cancelado')}">${c.status}</span></td>
+        <td>${c.gerado_mes_atual ? '<span class="badge pago">gerado</span>' : '<span class="badge atrasado">pendente</span>'}</td>
+        <td class="num">${money(c.valor_mensal)}</td>
+        <td class="num" style="white-space:nowrap">
+          ${c.status === 'ativo'
+            ? `<button class="btn btn-sm btn-ghost" onclick="mudarStatus(${c.id},'pausado')">pausar</button>`
+            : (c.status === 'pausado' ? `<button class="btn btn-sm btn-ghost" onclick="mudarStatus(${c.id},'ativo')">ativar</button>` : '')}
+          <button class="btn btn-sm btn-danger" onclick="cancelar(${c.id})">cancelar</button>
+        </td>
+      </tr>`).join('');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function abrirNovo() {
+  document.getElementById('formCtr').reset();
+  document.getElementById('c-inicio').value = hoje();
+  document.getElementById('c-dia').value = 10;
+  popularSelects();
+  openModal('modal');
+}
+
+document.getElementById('formCtr').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('btnSalvar');
+  btn.disabled = true; btn.textContent = 'Salvando…';
+  try {
+    await api('/api/contratos', { method: 'POST', body: {
+      tipo: document.getElementById('c-tipo').value,
+      descricao: document.getElementById('c-desc').value,
+      valor_mensal: document.getElementById('c-valor').value,
+      dia_vencimento: document.getElementById('c-dia').value,
+      data_inicio: document.getElementById('c-inicio').value,
+      data_fim: document.getElementById('c-fim').value || null,
+      contato_id: document.getElementById('c-contato').value || null,
+      categoria_id: document.getElementById('c-cat').value || null,
+    }});
+    toast('Contrato criado!', 'ok');
+    closeModal('modal');
+    carregar();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false; btn.textContent = 'Salvar contrato';
+});
+
+async function gerarMes() {
+  const comp = document.getElementById('g-comp').value;
+  try {
+    const r = await api('/api/contratos/gerar', { method: 'POST', body: comp ? { competencia: comp } : {} });
+    toast(r.gerados > 0 ? `${r.gerados} lançamento(s) gerado(s) para ${r.competencia}.` : `Nada a gerar em ${r.competencia} (já estava tudo lançado).`, 'ok');
+    carregar();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function mudarStatus(id, status) {
+  try { await api('/api/contratos/' + id, { method: 'PUT', body: { status } }); toast('Atualizado.', 'ok'); carregar(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+async function cancelar(id) {
+  if (!confirm('Cancelar este contrato? Para de gerar novas cobranças (lançamentos já gerados ficam).')) return;
+  try { await api('/api/contratos/' + id, { method: 'DELETE' }); toast('Contrato cancelado.', 'ok'); carregar(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+const now = new Date();
+document.getElementById('g-comp').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+carregarOpcoes();
+carregar();
+</script>
+</body>
+</html>

@@ -10,11 +10,11 @@
 </head>
 <body>
 <main class="main">
-  <div class="page-head"><div><h1>Cadastros</h1><div class="sub">Categorias, contatos e contas/caixa</div></div></div>
+  <div class="page-head"><div><h1>Cadastros</h1><div class="sub">Categorias, clientes e contas/caixa</div></div></div>
 
   <div class="tabs">
     <button class="active" data-tab="cat" onclick="setTab('cat', this)">Categorias</button>
-    <button data-tab="contato" onclick="setTab('contato', this)">Contatos</button>
+    <button data-tab="contato" onclick="setTab('contato', this)">Clientes</button>
     <button data-tab="conta" onclick="setTab('conta', this)">Contas / Caixa</button>
   </div>
 
@@ -45,10 +45,10 @@
         <div class="field"><label>E-mail</label><input type="email" id="ct-email"></div>
         <div class="field"><label>Telefone</label><input type="text" id="ct-tel"></div>
       </div>
-      <button class="btn btn-primary" onclick="addContato()">+ Adicionar contato</button>
+      <button class="btn btn-primary" onclick="addContato()">+ Adicionar cliente</button>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Nome</th><th>Tipo</th><th>Documento</th><th>Contato</th><th></th></tr></thead>
+      <thead><tr><th>Nome</th><th>Tipo</th><th>Documento</th><th>E-mail / Telefone</th><th></th></tr></thead>
       <tbody id="lista-contato"></tbody></table></div>
   </section>
 

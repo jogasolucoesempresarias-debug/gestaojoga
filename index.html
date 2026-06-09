@@ -26,6 +26,12 @@
     <div class="card kpi"><div class="label">Resultado do mês</div><div class="value" id="k-resultado">—</div><div class="hint" id="k-resultado-hint"></div></div>
   </div>
 
+  <div class="grid cols-3" style="margin-top:16px">
+    <div class="card kpi"><div class="label">Receita recorrente (MRR)</div><div class="value pos" id="k-mrr-rec">—</div><div class="hint">contratos ativos/mês</div></div>
+    <div class="card kpi"><div class="label">Custo fixo recorrente</div><div class="value neg" id="k-mrr-desp">—</div><div class="hint">despesas contratadas/mês</div></div>
+    <div class="card kpi"><div class="label">MRR líquido</div><div class="value" id="k-mrr-liq">—</div><div class="hint" id="k-mrr-arr"></div></div>
+  </div>
+
   <h2 class="section-title">Fluxo de caixa projetado (12 meses)</h2>
   <div class="card"><canvas id="chartFluxo" height="92"></canvas></div>
 
@@ -55,6 +61,13 @@ async function carregar() {
     res.textContent = money(r.resultado_mes);
     res.className = 'value ' + (r.resultado_mes >= 0 ? 'pos' : 'neg');
     document.getElementById('k-resultado-hint').textContent = `rec ${moneyShort(r.receita_mes)} · desp ${moneyShort(r.despesa_mes)}`;
+
+    document.getElementById('k-mrr-rec').textContent = money(r.mrr_receita || 0);
+    document.getElementById('k-mrr-desp').textContent = money(r.mrr_despesa || 0);
+    const liq = document.getElementById('k-mrr-liq');
+    liq.textContent = money(r.mrr_liquido || 0);
+    liq.className = 'value ' + ((r.mrr_liquido || 0) >= 0 ? 'pos' : 'neg');
+    document.getElementById('k-mrr-arr').textContent = `ARR ${moneyShort((r.mrr_liquido || 0) * 12)}`;
   } catch (e) { toast(e.message, 'err'); }
 
   try {

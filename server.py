@@ -155,6 +155,7 @@ PAGINAS = {
     '/':             'index.html',
     '/lancamentos':  'lancamentos.html',
     '/contas':       'contas.html',
+    '/recorrencias': 'recorrencias.html',
     '/impostos':     'impostos.html',
     '/cadastros':    'cadastros.html',
 }
@@ -680,6 +681,146 @@ def lancar_das():
 
 
 # ══════════════════════════════════════════════════════════════════════
+# Contratos / Recorrências (receita ou despesa fixa mensal)
+# ══════════════════════════════════════════════════════════════════════
+@app.route('/api/contratos', methods=['GET'])
+@login_required
+def contratos_list():
+    primeiro_dia = date.today().replace(day=1)
+    rows = q_all("""
+        SELECT c.*, ct.nome AS contato_nome, cat.nome AS categoria_nome,
+            EXISTS (SELECT 1 FROM lancamentos l
+                    WHERE l.contrato_id = c.id
+                      AND date_trunc('month', l.data_competencia) = %s) AS gerado_mes_atual
+        FROM contratos c
+        LEFT JOIN contatos  ct  ON ct.id  = c.contato_id
+        LEFT JOIN categorias cat ON cat.id = c.categoria_id
+        WHERE c.status <> 'cancelado'
+        ORDER BY c.status, c.descricao
+    """, (primeiro_dia,))
+    return jsonify({'ok': True, 'rows': rows})
+
+
+@app.route('/api/contratos', methods=['POST'])
+@login_required
+def contratos_create():
+    d = request.get_json() or {}
+    tipo = d.get('tipo')
+    descricao = (d.get('descricao') or '').strip()
+    if tipo not in ('receita', 'despesa'):
+        return jsonify({'ok': False, 'error': 'Tipo inválido (receita/despesa)'}), 400
+    if not descricao:
+        return jsonify({'ok': False, 'error': 'Descrição obrigatória'}), 400
+    try:
+        valor = Decimal(str(d.get('valor_mensal'))).quantize(Decimal('0.01'))
+    except Exception:
+        return jsonify({'ok': False, 'error': 'Valor mensal inválido'}), 400
+    if valor <= 0:
+        return jsonify({'ok': False, 'error': 'Valor mensal deve ser maior que zero'}), 400
+    dia = max(1, min(int(d.get('dia_vencimento') or 10), 28))
+    inicio = parse_date(d.get('data_inicio'), date.today())
+    fim = parse_date(d.get('data_fim'))
+    row = execute("""
+        INSERT INTO contratos
+            (contato_id, descricao, tipo, categoria_id, valor_mensal,
+             dia_vencimento, data_inicio, data_fim, criado_por)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *
+    """, (d.get('contato_id') or None, descricao, tipo, d.get('categoria_id') or None,
+          valor, dia, inicio, fim, session['user_id']), returning=True)
+    return jsonify({'ok': True, 'row': row})
+
+
+@app.route('/api/contratos/<int:cid>', methods=['PUT'])
+@login_required
+def contratos_update(cid):
+    d = request.get_json() or {}
+    status = d.get('status') if d.get('status') in ('ativo', 'pausado', 'cancelado') else None
+    execute("""
+        UPDATE contratos SET
+            descricao = COALESCE(%s, descricao),
+            contato_id = %s, categoria_id = %s,
+            valor_mensal = COALESCE(%s, valor_mensal),
+            dia_vencimento = COALESCE(%s, dia_vencimento),
+            data_fim = %s,
+            status = COALESCE(%s, status)
+        WHERE id = %s
+    """, (d.get('descricao'), d.get('contato_id') or None, d.get('categoria_id') or None,
+          d.get('valor_mensal'), d.get('dia_vencimento'), parse_date(d.get('data_fim')),
+          status, cid))
+    return jsonify({'ok': True})
+
+
+@app.route('/api/contratos/<int:cid>', methods=['DELETE'])
+@login_required
+def contratos_delete(cid):
+    """Cancela o contrato (soft). Lançamentos já gerados ficam intactos."""
+    execute("UPDATE contratos SET status='cancelado' WHERE id=%s", (cid,))
+    return jsonify({'ok': True})
+
+
+@app.route('/api/contratos/gerar', methods=['POST'])
+@login_required
+def contratos_gerar():
+    """Gera os lançamentos+parcelas dos contratos ativos para um mês (default: atual).
+    Idempotente: pula contratos que já têm lançamento naquele mês."""
+    d = request.get_json() or {}
+    comp = d.get('competencia')  # 'YYYY-MM'
+    hoje = date.today()
+    if comp:
+        try:
+            ano, mes = int(comp[:4]), int(comp[5:7])
+        except (ValueError, IndexError):
+            return jsonify({'ok': False, 'error': 'Competência inválida (use YYYY-MM)'}), 400
+    else:
+        ano, mes = hoje.year, hoje.month
+    primeiro_dia = date(ano, mes, 1)
+    ultimo_dia = date(ano, mes, calendar.monthrange(ano, mes)[1])
+
+    # Contratos ativos que cobrem o mês e ainda não foram gerados nele
+    pendentes = q_all("""
+        SELECT c.* FROM contratos c
+        WHERE c.status='ativo'
+          AND c.data_inicio <= %s AND (c.data_fim IS NULL OR c.data_fim >= %s)
+          AND NOT EXISTS (SELECT 1 FROM lancamentos l
+                          WHERE l.contrato_id = c.id
+                            AND date_trunc('month', l.data_competencia) = %s)
+    """, (ultimo_dia, primeiro_dia, primeiro_dia))
+
+    if not pendentes:
+        return jsonify({'ok': True, 'gerados': 0, 'competencia': f"{mes:02d}/{ano}"})
+
+    conn = get_db()
+    cur = conn.cursor()
+    gerados = 0
+    try:
+        for c in pendentes:
+            dia = min(int(c.get('dia_vencimento') or 10), calendar.monthrange(ano, mes)[1])
+            vencimento = date(ano, mes, dia)
+            descricao = f"{c['descricao']} {mes:02d}/{ano}"
+            cur.execute("""
+                INSERT INTO lancamentos (tipo, descricao, contato_id, categoria_id,
+                    valor_total, data_competencia, num_parcelas, contrato_id, criado_por)
+                VALUES (%s,%s,%s,%s,%s,%s,1,%s,%s) RETURNING id
+            """, (c['tipo'], descricao, c.get('contato_id'), c.get('categoria_id'),
+                  c['valor_mensal'], primeiro_dia, c['id'], session['user_id']))
+            lid = cur.fetchone()[0]
+            cur.execute("""
+                INSERT INTO parcelas (lancamento_id, numero, valor, data_vencimento, status)
+                VALUES (%s, 1, %s, %s, 'previsto')
+            """, (lid, c['valor_mensal'], vencimento))
+            gerados += 1
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    cur.close()
+    conn.close()
+    return jsonify({'ok': True, 'gerados': gerados, 'competencia': f"{mes:02d}/{ano}"})
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Dashboard
 # ══════════════════════════════════════════════════════════════════════
 def _saldo_atual():
@@ -701,6 +842,29 @@ def _previstas(tipos, ini, fim):
         WHERE p.status='previsto' AND l.tipo IN ({placeholders})
           AND p.data_vencimento >= %s AND p.data_vencimento <= %s
     """, (*tipos, ini, fim)) or 0
+
+
+def _recorrentes_mes(tipo, primeiro_dia, ultimo_dia):
+    """Projeção Opção 2: soma valor_mensal de contratos ativos que cobrem o mês E
+    ainda NÃO têm lançamento gerado nele (senão já está contado via parcelas)."""
+    return scalar("""
+        SELECT COALESCE(SUM(c.valor_mensal),0) FROM contratos c
+        WHERE c.status='ativo' AND c.tipo=%s
+          AND c.data_inicio <= %s AND (c.data_fim IS NULL OR c.data_fim >= %s)
+          AND NOT EXISTS (SELECT 1 FROM lancamentos l
+                          WHERE l.contrato_id = c.id
+                            AND date_trunc('month', l.data_competencia) = %s)
+    """, (tipo, ultimo_dia, primeiro_dia, primeiro_dia)) or 0
+
+
+def _mrr(tipo):
+    """Receita/despesa recorrente mensal: soma de contratos ativos que cobrem hoje."""
+    hoje = date.today()
+    return scalar("""
+        SELECT COALESCE(SUM(valor_mensal),0) FROM contratos
+        WHERE status='ativo' AND tipo=%s
+          AND data_inicio <= %s AND (data_fim IS NULL OR data_fim >= %s)
+    """, (tipo, hoje, hoje)) or 0
 
 
 @app.route('/api/dashboard/resumo')
@@ -725,6 +889,9 @@ def dashboard_resumo():
         WHERE tipo IN ('despesa','imposto') AND data_competencia >= %s AND data_competencia <= %s
     """, (inicio_mes, fim_mes)) or 0
 
+    mrr_receita = round(_mrr('receita'), 2)
+    mrr_despesa = round(_mrr('despesa'), 2)
+
     return jsonify({'ok': True, 'resumo': {
         'saldo_atual': saldo,
         'a_receber_30': receber(hoje, add_months(hoje, 1)),
@@ -738,6 +905,9 @@ def dashboard_resumo():
         'receita_mes': round(receita_mes, 2),
         'despesa_mes': round(despesa_mes, 2),
         'resultado_mes': round(receita_mes - despesa_mes, 2),
+        'mrr_receita': mrr_receita,
+        'mrr_despesa': mrr_despesa,
+        'mrr_liquido': round(mrr_receita - mrr_despesa, 2),
     }})
 
 
@@ -756,8 +926,9 @@ def dashboard_fluxo():
     for i in range(meses):
         mref = add_months(inicio, i)
         ult = date(mref.year, mref.month, calendar.monthrange(mref.year, mref.month)[1])
-        entradas = round(_previstas(['receita'], mref, ult), 2)
-        saidas = round(_previstas(['despesa', 'imposto'], mref, ult), 2)
+        # Parcelas já geradas no mês + projeção dos contratos ativos ainda não gerados (Opção 2)
+        entradas = round(_previstas(['receita'], mref, ult) + _recorrentes_mes('receita', mref, ult), 2)
+        saidas = round(_previstas(['despesa', 'imposto'], mref, ult) + _recorrentes_mes('despesa', mref, ult), 2)
         liquido = round(entradas - saidas, 2)
         acumulado = round(acumulado + liquido, 2)
         rows.append({
