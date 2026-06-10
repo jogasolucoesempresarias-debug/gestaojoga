@@ -13,13 +13,15 @@ from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, Json
 from flask import (
     Flask, jsonify, send_from_directory, request, session, redirect, Response
 )
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
+
+import comercial_agente
 
 load_dotenv()
 
@@ -157,6 +159,7 @@ PAGINAS = {
     '/contas':       'contas.html',
     '/recorrencias': 'recorrencias.html',
     '/impostos':     'impostos.html',
+    '/comercial':    'comercial.html',
     '/cadastros':    'cadastros.html',
 }
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -937,6 +940,40 @@ def dashboard_fluxo():
             'liquido': liquido, 'acumulado': acumulado,
         })
     return jsonify({'ok': True, 'saldo_inicial': saldo, 'rows': rows})
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Agente de IA Comercial
+# ══════════════════════════════════════════════════════════════════════
+@app.route('/api/comercial/chat', methods=['POST'])
+@login_required
+def comercial_chat():
+    data = request.get_json() or {}
+    messages = data.get('messages') or []
+    try:
+        out = comercial_agente.chat(messages)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'Falha no agente: {e}'}), 502
+    # Persiste a estimativa gerada (histórico), sem derrubar a resposta em caso de erro
+    if out.get('estimativa'):
+        try:
+            execute("INSERT INTO orcamentos (criado_por, tipo_servico, payload) VALUES (%s,%s,%s)",
+                    (session['user_id'], out['estimativa'].get('tipo_servico'), Json(out['estimativa'])))
+        except Exception:
+            pass
+    return jsonify({'ok': True, 'reply': out.get('reply'),
+                    'estimativa': out.get('estimativa'), 'mock': out.get('mock', False)})
+
+
+@app.route('/api/comercial/orcamentos', methods=['GET'])
+@login_required
+def comercial_orcamentos():
+    rows = q_all("""
+        SELECT o.id, o.tipo_servico, o.payload, o.criado_em, u.nome AS criado_por_nome
+        FROM orcamentos o LEFT JOIN usuarios u ON u.id = o.criado_por
+        ORDER BY o.id DESC LIMIT 50
+    """)
+    return jsonify({'ok': True, 'rows': rows})
 
 
 # ══════════════════════════════════════════════════════════════════════

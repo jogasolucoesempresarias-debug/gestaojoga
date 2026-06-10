@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Gestão JOGA — Agente Comercial</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2338bdf8'/%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main class="main">
+  <div class="page-head">
+    <div><h1>Agente Comercial IA</h1><div class="sub">Escopa, precifica e te ajuda a vender — preço sai do motor, não do "achismo"</div></div>
+    <span class="badge previsto" id="modo-badge" style="display:none">modo mock</span>
+  </div>
+
+  <div class="chat-wrap">
+    <!-- Chat -->
+    <div class="chat">
+      <div class="chips">
+        <button class="chip" onclick="atalho('Quero orçar um projeto. Pode me entrevistar.')">🧭 Orçar projeto</button>
+        <button class="chip" onclick="atalho('Vou colar um briefing rápido e quero uma base de preço: ')">⚡ Base rápida</button>
+        <button class="chip" onclick="atalho('Me dá dicas pra apresentar o preço e contornar objeção de \'tá caro\'.')">💡 Pedir dica</button>
+      </div>
+      <div class="chat-msgs" id="msgs"></div>
+      <div class="chat-input">
+        <textarea id="inp" rows="2" placeholder="Descreva o projeto, o cliente, a dor... (Enter envia, Shift+Enter quebra linha)"></textarea>
+        <button class="btn btn-primary" id="send" onclick="enviar()">Enviar</button>
+      </div>
+    </div>
+
+    <!-- Card de estimativa -->
+    <div class="card est-card" id="est" style="display:none">
+      <h2 class="section-title" style="margin-top:0">Estimativa</h2>
+      <div class="row"><span class="muted">Valor sugerido (setup)</span></div>
+      <div class="big" id="e-sugerido">—</div>
+      <div class="row"><span class="muted">Faixa</span><span id="e-faixa">—</span></div>
+      <div class="row"><span class="muted">Recorrência/mês</span><span id="e-recorrencia">—</span></div>
+      <div class="row"><span class="muted">Tipo / Tier</span><span id="e-tipo">—</span></div>
+      <div class="row"><span class="muted">Confiança</span><span id="e-conf">—</span></div>
+      <div id="e-roi-wrap" style="display:none">
+        <div class="row"><span class="muted">Payback</span><span id="e-payback">—</span></div>
+        <div class="row"><span class="muted">Ganho 12m</span><span id="e-ganho">—</span></div>
+      </div>
+      <div class="row" style="display:block"><span class="muted">Premissas</span><div id="e-premissas" style="font-size:0.8rem;margin-top:5px"></div></div>
+      <div class="row" id="e-abertas-wrap" style="display:none"><span class="muted">A confirmar</span></div>
+      <div id="e-abertas" style="font-size:0.8rem;color:var(--yellow)"></div>
+    </div>
+  </div>
+</main>
+
+<script src="/static/app.js"></script>
+<script>
+renderShell('/comercial');
+const historico = [];  // [{role, content}]
+let enviando = false;
+
+function addMsg(role, texto) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
+  // negrito simples **x** → <strong>
+  div.innerHTML = escapeHtml(texto).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  document.getElementById('msgs').appendChild(div);
+  scrollFim();
+}
+function scrollFim() { const m = document.getElementById('msgs'); m.scrollTop = m.scrollHeight; }
+
+function atalho(t) { document.getElementById('inp').value = t; document.getElementById('inp').focus(); }
+
+async function enviar() {
+  if (enviando) return;
+  const inp = document.getElementById('inp');
+  const texto = inp.value.trim();
+  if (!texto) return;
+  addMsg('user', texto);
+  historico.push({ role: 'user', content: texto });
+  inp.value = '';
+  enviando = true; document.getElementById('send').disabled = true;
+
+  const typing = document.createElement('div');
+  typing.className = 'typing'; typing.textContent = 'Agente pensando…';
+  document.getElementById('msgs').appendChild(typing); scrollFim();
+
+  try {
+    const j = await api('/api/comercial/chat', { method: 'POST', body: { messages: historico } });
+    typing.remove();
+    addMsg('bot', j.reply || '(sem resposta)');
+    historico.push({ role: 'assistant', content: j.reply || '' });
+    if (j.mock) document.getElementById('modo-badge').style.display = 'inline-block';
+    if (j.estimativa) renderEstimativa(j.estimativa);
+  } catch (e) {
+    typing.remove();
+    addMsg('bot', '⚠️ ' + e.message);
+  }
+  enviando = false; document.getElementById('send').disabled = false;
+}
+
+function renderEstimativa(e) {
+  document.getElementById('est').style.display = 'block';
+  document.getElementById('e-sugerido').textContent = money(e.valor_sugerido);
+  document.getElementById('e-faixa').textContent = `${money(e.setup_min)} – ${money(e.setup_max)}`;
+  document.getElementById('e-recorrencia').textContent = money(e.recorrencia_mensal) + '/mês';
+  document.getElementById('e-tipo').textContent = `${e.tipo_servico} · ${e.complexidade.tier}`;
+  const conf = { alta: '🟢 alta', media: '🟡 média', baixa: '🔴 baixa' }[e.confianca] || e.confianca;
+  document.getElementById('e-conf').textContent = conf;
+  if (e.roi) {
+    document.getElementById('e-roi-wrap').style.display = 'block';
+    document.getElementById('e-payback').textContent = `${e.roi.payback_meses} meses`;
+    document.getElementById('e-ganho').textContent = money(e.roi.ganho_12m);
+  } else {
+    document.getElementById('e-roi-wrap').style.display = 'none';
+  }
+  document.getElementById('e-premissas').innerHTML = (e.premissas || []).map(p => '• ' + escapeHtml(p)).join('<br>');
+  const abertas = e.perguntas_abertas || [];
+  document.getElementById('e-abertas-wrap').style.display = abertas.length ? 'flex' : 'none';
+  document.getElementById('e-abertas').innerHTML = abertas.map(p => '• ' + escapeHtml(p)).join('<br>');
+}
+
+document.getElementById('inp').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar(); }
+});
+
+addMsg('bot', 'Olá! Sou o **Agente Comercial da JOGA**. Posso te entrevistar pra orçar um projeto, dar uma base rápida a partir de um briefing, ou te dar dicas de como apresentar o preço. Por onde começamos?');
+</script>
+</body>
+</html>

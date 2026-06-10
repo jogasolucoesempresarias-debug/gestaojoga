@@ -145,6 +145,17 @@ cur.execute("CREATE INDEX IF NOT EXISTS ix_contratos_status ON contratos(status)
 cur.execute("ALTER TABLE lancamentos ADD COLUMN IF NOT EXISTS contrato_id INTEGER REFERENCES contratos(id) ON DELETE SET NULL;")
 cur.execute("CREATE INDEX IF NOT EXISTS ix_lanc_contrato ON lancamentos(contrato_id);")
 
+# ── Orçamentos gerados pelo Agente Comercial (histórico) ──────────────
+cur.execute("""
+    CREATE TABLE IF NOT EXISTS orcamentos (
+        id           SERIAL PRIMARY KEY,
+        criado_por   INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+        tipo_servico VARCHAR(30),
+        payload      JSONB,
+        criado_em    TIMESTAMP DEFAULT NOW()
+    );
+""")
+
 # ── Seeds ─────────────────────────────────────────────────────────────
 
 # Linha única de parâmetros

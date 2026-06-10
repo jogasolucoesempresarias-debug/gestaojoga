@@ -173,6 +173,26 @@ td.num, th.num { text-align: right; font-family: 'JetBrains Mono', monospace; }
 .preview-parcelas { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; max-height: 160px; overflow-y: auto; }
 .preview-parcelas .pl { display: flex; justify-content: space-between; padding: 3px 0; font-family: 'JetBrains Mono', monospace; }
 
+/* Chat (Agente Comercial) */
+.chat-wrap { display: grid; grid-template-columns: 1fr 360px; gap: 18px; align-items: start; }
+.chat { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; display: flex; flex-direction: column; height: calc(100vh - 160px); }
+.chat-msgs { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.msg { max-width: 80%; padding: 11px 14px; border-radius: 12px; font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap; }
+.msg.user { align-self: flex-end; background: var(--surface2); border: 1px solid var(--border); border-bottom-right-radius: 3px; }
+.msg.bot { align-self: flex-start; background: rgba(56,189,248,0.07); border: 1px solid rgba(56,189,248,0.2); border-bottom-left-radius: 3px; }
+.msg.bot strong { color: var(--accent); }
+.chat-input { display: flex; gap: 8px; padding: 14px; border-top: 1px solid var(--border); }
+.chat-input textarea { flex: 1; resize: none; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: inherit; font-size: 0.9rem; padding: 10px 12px; max-height: 120px; }
+.chat-input textarea:focus { outline: none; border-color: var(--accent); }
+.chips { display: flex; gap: 7px; flex-wrap: wrap; padding: 12px 14px 0; }
+.chip { padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface2); color: var(--text-dim); font-size: 0.78rem; cursor: pointer; }
+.chip:hover { border-color: var(--accent); color: var(--text); }
+.typing { align-self: flex-start; color: var(--text-dim); font-size: 0.82rem; font-style: italic; }
+.est-card .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 0.86rem; border-bottom: 1px dashed var(--border); }
+.est-card .row:last-child { border-bottom: none; }
+.est-card .big { font-size: 1.5rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--accent); }
+@media (max-width: 900px) { .chat-wrap { grid-template-columns: 1fr; } .chat { height: 60vh; } }
+
 @media (max-width: 860px) {
   .sidebar { width: 64px; }
   .brand .name, .brand .sub, .nav a span:not(.ico), .sidebar .foot span { display: none; }

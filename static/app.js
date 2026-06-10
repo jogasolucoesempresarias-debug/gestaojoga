@@ -60,6 +60,7 @@ const NAV_ITEMS = [
   { href: '/contas',      ico: '↹', label: 'A pagar / receber' },
   { href: '/recorrencias', ico: '↻', label: 'Recorrências' },
   { href: '/impostos',    ico: '%', label: 'Impostos' },
+  { href: '/comercial',   ico: '☉', label: 'Comercial IA' },
   { href: '/cadastros',   ico: '⚙', label: 'Cadastros' },
 ];
 
