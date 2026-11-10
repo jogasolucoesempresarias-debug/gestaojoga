@@ -32,11 +32,13 @@
   </div>
 </main>
 
-<!-- Modal novo lançamento -->
+<!-- Modal lançamento (novo / editar) -->
 <div class="modal-bg" id="modal">
   <div class="modal">
-    <h2>Novo lançamento</h2>
+    <h2 id="m-titulo">Novo lançamento</h2>
     <form id="formLanc">
+      <input type="hidden" id="m-id">
+      <div class="aviso-box" id="m-aviso" style="display:none"></div>
       <div class="row3">
         <div class="field"><label>Tipo *</label>
           <select id="m-tipo" required><option value="receita">Receita</option><option value="despesa">Despesa</option><option value="imposto">Imposto</option></select></div>
@@ -53,7 +55,7 @@
           </div></div>
       </div>
       <div class="row3">
-        <div class="field"><label>Nº parcelas</label><input type="number" id="m-parcelas" value="1" min="1" max="60"></div>
+        <div class="field"><label>Nº parcelas</label><input type="number" id="m-parcelas" value="1" min="1" max="120"></div>
         <div class="field"><label>1º vencimento</label><input type="date" id="m-venc"></div>
         <div class="field"><label>Conta padrão</label><select id="m-conta"></select></div>
       </div>
@@ -62,7 +64,7 @@
         <div class="field"><label>Forma de pagamento</label><input type="text" id="m-forma" placeholder="Pix, boleto, cartão…"></div>
       </div>
       <div class="field"><label>Observação da NF</label><textarea id="m-nfobs" rows="2"></textarea></div>
-      <div class="field"><label>Prévia das parcelas</label><div class="preview-parcelas" id="preview">—</div></div>
+      <div class="field"><label id="preview-label">Prévia das parcelas</label><div class="preview-parcelas" id="preview">—</div></div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" onclick="closeModal('modal')">Cancelar</button>
         <button type="submit" class="btn btn-primary" id="btnSalvar">Salvar lançamento</button>
@@ -74,7 +76,8 @@
 <script src="/static/app.js"></script>
 <script>
 renderShell('/lancamentos');
-let CATS = [], CONTATOS = [], CONTAS = [];
+let CATS = [], CONTATOS = [], CONTAS = [], LISTA = [];
+let EDIT = null;   // { lanc, parcelas, pagas, inicial: {conta, forma} } quando editando
 
 async function carregar() {
   const p = new URLSearchParams();
@@ -84,18 +87,22 @@ async function carregar() {
   const q = document.getElementById('f-q').value.trim(); if (q) p.set('q', q);
   try {
     const { rows } = await api('/api/lancamentos?' + p.toString());
+    LISTA = rows;
     const tb = document.getElementById('lista');
     if (!rows.length) { tb.innerHTML = '<tr><td colspan="8" class="empty">Nenhum lançamento.</td></tr>'; return; }
     tb.innerHTML = rows.map(l => `
       <tr>
         <td>${fmtDate(l.data_competencia)}</td>
-        <td>${escapeHtml(l.descricao)}</td>
-        <td>${l.categoria_nome ? '<span class="dot" style="background:' + (l.categoria_cor || '#38bdf8') + '"></span>' + escapeHtml(l.categoria_nome) : '<span class="muted">—</span>'}</td>
+        <td>${escapeHtml(l.descricao)}${l.contrato_id ? ' <span class="muted" title="Gerado pelo contrato ' + escapeHtml(l.contrato_descricao || '') + '">↻</span>' : ''}</td>
+        <td>${l.categoria_nome ? '<span class="dot" style="background:' + escapeHtml(l.categoria_cor || '#38bdf8') + '"></span>' + escapeHtml(l.categoria_nome) : '<span class="muted">—</span>'}</td>
         <td>${l.contato_nome ? escapeHtml(l.contato_nome) : '<span class="muted">—</span>'}</td>
         <td>${l.num_nf ? escapeHtml(l.num_nf) : '<span class="muted">—</span>'}</td>
         <td><span class="badge ${l.tipo}">${l.tipo}</span> ${l.parcelas_pagas}/${l.qtd_parcelas}</td>
         <td class="num">${money(l.valor_total)}</td>
-        <td class="num"><button class="btn btn-sm btn-danger" onclick="excluir(${l.id})">excluir</button></td>
+        <td><div class="acoes">
+          <button class="btn btn-sm btn-ghost" onclick="abrirEditar(${l.id})">editar</button>
+          <button class="btn btn-sm btn-danger" onclick="excluir(${l.id})">excluir</button>
+        </div></td>
       </tr>`).join('');
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -110,37 +117,94 @@ async function carregarOpcoes() {
 function popularSelects() {
   const tipo = document.getElementById('m-tipo').value;
   const catTipo = tipo === 'receita' ? 'receita' : 'despesa';
-  document.getElementById('m-cat').innerHTML = '<option value="">—</option>' +
-    CATS.filter(c => c.tipo === catTipo).map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
-  document.getElementById('m-contato').innerHTML = '<option value="">—</option>' +
-    CONTATOS.map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
-  document.getElementById('m-conta').innerHTML = '<option value="">—</option>' +
-    CONTAS.map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
+  // re-renderiza preservando o que já estava escolhido (trocar o tipo não pode apagar cliente/conta)
+  const manter = id => { const s = document.getElementById(id); return [...s.selectedOptions].map(o => ({ v: o.value, t: o.textContent }))[0]; };
+  const cat = manter('m-cat'), ct = manter('m-contato'), co = manter('m-conta');
+  document.getElementById('m-cat').innerHTML = opcoes(CATS.filter(c => c.tipo === catTipo));
+  document.getElementById('m-contato').innerHTML = opcoes(CONTATOS);
+  document.getElementById('m-conta').innerHTML = opcoes(CONTAS);
+  if (cat && cat.v && CATS.some(c => String(c.id) === cat.v && c.tipo === catTipo)) document.getElementById('m-cat').value = cat.v;
+  if (ct && ct.v) selecionar('m-contato', ct.v, ct.t.replace(/ \(inativo\)$/, ''));
+  if (co && co.v) selecionar('m-conta', co.v, co.t.replace(/ \(inativo\)$/, ''));
+}
+
+const CAMPOS_ESTRUTURA = ['m-tipo', 'm-valor', 'm-parcelas', 'm-venc'];
+
+function modoForm(edit, travado) {
+  CAMPOS_ESTRUTURA.forEach(id => document.getElementById(id).disabled = travado);
+  document.getElementById('m-titulo').textContent = edit ? 'Editar lançamento' : 'Novo lançamento';
 }
 
 function abrirNovo() {
+  EDIT = null;
   document.getElementById('formLanc').reset();
+  document.getElementById('m-id').value = '';
+  document.getElementById('m-aviso').style.display = 'none';
+  modoForm(false, false);
+  popularSelects();
   document.getElementById('m-comp').value = hoje();
   document.getElementById('m-venc').value = hoje();
   document.getElementById('m-parcelas').value = 1;
+  atualizarPreview();
+  openModal('modal');
+}
+
+async function abrirEditar(id) {
+  let det;
+  try { det = await api('/api/lancamentos/' + id); } catch (e) { toast(e.message, 'err'); return; }
+  const l = det.lancamento, ps = det.parcelas;
+  const pagas = ps.filter(p => p.status === 'pago').length;
+  const primeira = ps[0] || {};
+  EDIT = { lanc: l, parcelas: ps, pagas, inicial: { conta: String(primeira.conta_id || ''), forma: primeira.forma_pagamento || '' } };
+
+  document.getElementById('formLanc').reset();
+  document.getElementById('m-id').value = l.id;
+  document.getElementById('m-tipo').value = l.tipo;
   popularSelects();
+  document.getElementById('m-valor').value = l.valor_total;
+  document.getElementById('m-comp').value = l.data_competencia;
+  document.getElementById('m-desc').value = l.descricao;
+  selecionar('m-cat', l.categoria_id, l.categoria_nome);
+  selecionar('m-contato', l.contato_id, l.contato_nome);
+  document.getElementById('m-parcelas').value = l.num_parcelas || 1;
+  document.getElementById('m-venc').value = primeira.data_vencimento || l.data_competencia;
+  selecionar('m-conta', primeira.conta_id, null);
+  document.getElementById('m-nf').value = l.num_nf || '';
+  document.getElementById('m-forma').value = primeira.forma_pagamento || '';
+  document.getElementById('m-nfobs').value = l.nf_obs || '';
+
+  const aviso = document.getElementById('m-aviso');
+  const msgs = [];
+  if (pagas) msgs.push(`Tem ${pagas} parcela(s) paga(s): tipo, valor, nº de parcelas e vencimento ficam travados. Para ajustar uma parcela só, use "A pagar / receber" (ou estorne o pagamento).`);
+  if (l.contrato_id) msgs.push(`Gerado pelo contrato "${escapeHtml(l.contrato_descricao || '')}". Mudar o contrato não altera este lançamento.`);
+  aviso.innerHTML = msgs.join('<br>');
+  aviso.style.display = msgs.length ? '' : 'none';
+  modoForm(true, pagas > 0);
   atualizarPreview();
   openModal('modal');
 }
 
 function atualizarPreview() {
+  const box = document.getElementById('preview');
+  const label = document.getElementById('preview-label');
+  if (EDIT && EDIT.pagas) {
+    label.textContent = 'Parcelas';
+    box.innerHTML = EDIT.parcelas.map(p => `<div class="pl"><span>${p.numero} · ${fmtDate(p.data_vencimento)} · ${p.status_efetivo}</span><span>${money(p.valor_pago ?? p.valor)}</span></div>`).join('');
+    return;
+  }
+  label.textContent = EDIT ? 'Prévia das parcelas (se mudar valor, parcelas ou vencimento, elas são refeitas)' : 'Prévia das parcelas';
   const total = parseFloat(document.getElementById('m-valor').value || '0');
   const n = Math.max(1, parseInt(document.getElementById('m-parcelas').value || '1', 10));
   const venc = document.getElementById('m-venc').value || hoje();
-  const box = document.getElementById('preview');
   if (!total || total <= 0) { box.textContent = 'Informe o valor.'; return; }
   const base = Math.round((total / n) * 100) / 100;
   let linhas = '', soma = 0;
   const [y, m, d] = venc.split('-').map(Number);
   for (let i = 0; i < n; i++) {
-    let v = (i === n - 1) ? Math.round((total - base * (n - 1)) * 100) / 100 : base;
+    const v = (i === n - 1) ? Math.round((total - base * (n - 1)) * 100) / 100 : base;
     soma += v;
-    const dt = new Date(y, m - 1 + i, d);
+    const ult = new Date(y, m + i, 0).getDate();           // último dia do mês alvo
+    const dt = new Date(y, m - 1 + i, Math.min(d, ult));   // mesmo ajuste do servidor (31 → 30/28)
     linhas += `<div class="pl"><span>${i + 1}/${n} · ${dt.toLocaleDateString('pt-BR')}</span><span>${money(v)}</span></div>`;
   }
   box.innerHTML = linhas + `<div class="pl" style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px"><strong>Total</strong><strong>${money(soma)}</strong></div>`;
@@ -152,24 +216,35 @@ document.getElementById('m-tipo').addEventListener('change', popularSelects);
 document.getElementById('formLanc').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = document.getElementById('btnSalvar');
+  const id = document.getElementById('m-id').value;
   btn.disabled = true; btn.textContent = 'Salvando…';
+  const v = k => document.getElementById(k).value;
   const payload = {
-    tipo: document.getElementById('m-tipo').value,
-    descricao: document.getElementById('m-desc').value,
-    valor_total: document.getElementById('m-valor').value,
-    data_competencia: document.getElementById('m-comp').value,
-    categoria_id: document.getElementById('m-cat').value || null,
-    contato_id: document.getElementById('m-contato').value || null,
-    num_parcelas: document.getElementById('m-parcelas').value,
-    primeiro_vencimento: document.getElementById('m-venc').value,
-    conta_id: document.getElementById('m-conta').value || null,
-    num_nf: document.getElementById('m-nf').value || null,
-    forma_pagamento: document.getElementById('m-forma').value || null,
-    nf_obs: document.getElementById('m-nfobs').value || null,
+    descricao: v('m-desc'),
+    data_competencia: v('m-comp'),
+    categoria_id: v('m-cat') || null,
+    contato_id: v('m-contato') || null,
+    num_nf: v('m-nf') || null,
+    nf_obs: v('m-nfobs') || null,
   };
   try {
-    await api('/api/lancamentos', { method: 'POST', body: payload });
-    toast('Lançamento criado!', 'ok');
+    if (id) {
+      if (!EDIT.pagas) Object.assign(payload, {
+        tipo: v('m-tipo'), valor_total: v('m-valor'), num_parcelas: v('m-parcelas'), primeiro_vencimento: v('m-venc'),
+      });
+      // conta/forma só vão se mudaram (senão apagaria a conta escolhida parcela a parcela)
+      if (v('m-conta') !== EDIT.inicial.conta) payload.conta_id = v('m-conta') || null;
+      if (v('m-forma') !== EDIT.inicial.forma) payload.forma_pagamento = v('m-forma') || null;
+      await api('/api/lancamentos/' + id, { method: 'PUT', body: payload });
+      toast('Lançamento atualizado!', 'ok');
+    } else {
+      Object.assign(payload, {
+        tipo: v('m-tipo'), valor_total: v('m-valor'), num_parcelas: v('m-parcelas'), primeiro_vencimento: v('m-venc'),
+        conta_id: v('m-conta') || null, forma_pagamento: v('m-forma') || null,
+      });
+      await api('/api/lancamentos', { method: 'POST', body: payload });
+      toast('Lançamento criado!', 'ok');
+    }
     closeModal('modal');
     carregar();
   } catch (e) { toast(e.message, 'err'); }
@@ -177,9 +252,21 @@ document.getElementById('formLanc').addEventListener('submit', async (e) => {
 });
 
 async function excluir(id) {
-  if (!confirm('Excluir este lançamento e todas as parcelas?')) return;
-  try { await api('/api/lancamentos/' + id, { method: 'DELETE' }); toast('Excluído.', 'ok'); carregar(); }
-  catch (e) { toast(e.message, 'err'); }
+  const l = LISTA.find(x => x.id === id) || {};
+  let msg = 'Excluir este lançamento e todas as parcelas?';
+  if (l.contrato_id) msg += `\n\nEle veio do contrato "${l.contrato_descricao || ''}": o contrato vai PULAR este mês (não gera de novo). Para cobrar este mês depois, use "gerar" na tela de Recorrências.`;
+  if (!confirm(msg)) return;
+  try {
+    await api('/api/lancamentos/' + id, { method: 'DELETE' });
+  } catch (e) {
+    if (e.status === 409 && e.data && e.data.precisa_confirmar) {
+      if (!confirm(`Atenção: ${e.data.pagas} parcela(s) já paga(s), ${money(e.data.valor_pago)}.\nExcluir tira esse dinheiro do saldo das contas.\n\nSe o pagamento não aconteceu, prefira "estornar" em A pagar / receber.\n\nExcluir mesmo assim?`)) return;
+      try { await api('/api/lancamentos/' + id + '?forcar=1', { method: 'DELETE' }); }
+      catch (e2) { toast(e2.message, 'err'); return; }
+    } else { toast(e.message, 'err'); return; }
+  }
+  toast('Excluído.', 'ok');
+  carregar();
 }
 
 carregarOpcoes();

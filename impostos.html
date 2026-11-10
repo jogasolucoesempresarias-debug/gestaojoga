@@ -10,36 +10,45 @@
 </head>
 <body>
 <main class="main">
-  <div class="page-head"><div><h1>Impostos</h1><div class="sub">DAS-MEI e parâmetros tributários</div></div></div>
+  <div class="page-head"><div><h1>Impostos</h1><div class="sub">DAS (MEI ou Simples Nacional) e parâmetros tributários</div></div></div>
 
   <div class="grid cols-2">
     <div class="card">
       <h2 class="section-title" style="margin-top:0">Configuração</h2>
       <div class="field"><label>Regime tributário</label>
-        <select id="p-regime"><option value="MEI">MEI</option><option value="ME-Simples">ME — Simples Nacional</option></select></div>
-      <div class="row2">
+        <select id="p-regime"><option value="MEI">MEI (DAS fixo)</option><option value="ME-Simples">ME/LTDA — Simples Nacional</option></select></div>
+
+      <div id="bloco-mei">
         <div class="field"><label>Valor do DAS-MEI (R$/mês)</label><input type="number" id="p-das" step="0.01" min="0"></div>
-        <div class="field"><label>Dia de vencimento</label><input type="number" id="p-dia" min="1" max="28" value="20"></div>
       </div>
-      <div class="field"><label>Alíquota Simples (% — futuro ME)</label><input type="number" id="p-aliq" step="0.001" min="0" placeholder="deixe vazio enquanto for MEI">
-        <div class="hint">Preparado para a virada ME. Enquanto for MEI, só o DAS fixo é usado.</div></div>
+
+      <div id="bloco-simples" style="display:none">
+        <div class="row2">
+          <div class="field"><label>Alíquota efetiva (%)</label><input type="number" id="p-aliq" step="0.001" min="0" placeholder="ex.: 6"></div>
+          <div class="field"><label>Base de cálculo</label>
+            <select id="p-base"><option value="competencia">Competência</option><option value="caixa">Caixa</option></select></div>
+        </div>
+        <div class="hint" style="margin:-6px 0 14px">Competência = faturado no mês; caixa = recebido no mês. A alíquota efetiva vem da contadora: depende do anexo (III ou V, pelo fator R) e do faturamento dos últimos 12 meses. O DAS de um mês vence no mês seguinte.</div>
+      </div>
+
+      <div class="field"><label>Dia de vencimento do DAS</label><input type="number" id="p-dia" min="1" max="28" value="20"></div>
       <button class="btn btn-primary" onclick="salvarParam()">Salvar configuração</button>
     </div>
 
     <div class="card">
-      <h2 class="section-title" style="margin-top:0">Lançar DAS do mês</h2>
-      <p class="muted" style="font-size:0.85rem;margin-bottom:14px">Gera um lançamento de imposto + 1 parcela com vencimento no dia configurado. Não duplica se o mês já foi lançado.</p>
-      <div class="field"><label>Competência</label><input type="month" id="d-comp"></div>
-      <button class="btn btn-primary" onclick="lancarDas()">Lançar DAS</button>
-      <div id="das-info" class="hint" style="margin-top:12px"></div>
+      <h2 class="section-title" style="margin-top:0">Lançar DAS</h2>
+      <div class="field"><label>Competência (mês do faturamento)</label><input type="month" id="d-comp"></div>
+      <div class="info-box" id="das-previa">—</div>
+      <button class="btn btn-primary" id="btn-das" onclick="lancarDas()">Lançar DAS</button>
+      <div class="hint" style="margin-top:10px">Gera um lançamento de imposto com 1 parcela. Não duplica se o mês já foi lançado. Se o valor mudar, exclua no histórico e lance de novo.</div>
     </div>
   </div>
 
   <h2 class="section-title">Histórico de impostos</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Competência</th><th>Descrição</th><th>Status</th><th class="num">Valor</th></tr></thead>
-      <tbody id="hist"><tr><td colspan="4" class="empty">Carregando…</td></tr></tbody>
+      <thead><tr><th>Competência</th><th>Descrição</th><th>Status</th><th class="num">Valor</th><th></th></tr></thead>
+      <tbody id="hist"><tr><td colspan="5" class="empty">Carregando…</td></tr></tbody>
     </table>
   </div>
 </main>
@@ -48,6 +57,13 @@
 <script>
 renderShell('/impostos');
 
+function mostrarBlocos() {
+  const simples = document.getElementById('p-regime').value !== 'MEI';
+  document.getElementById('bloco-mei').style.display = simples ? 'none' : '';
+  document.getElementById('bloco-simples').style.display = simples ? '' : 'none';
+}
+document.getElementById('p-regime').addEventListener('change', mostrarBlocos);
+
 async function carregarParam() {
   try {
     const { parametros: p } = await api('/api/parametros');
@@ -55,31 +71,63 @@ async function carregarParam() {
     document.getElementById('p-das').value = p.das_mei_valor ?? '';
     document.getElementById('p-dia').value = p.das_vencimento_dia ?? 20;
     document.getElementById('p-aliq').value = p.aliquota_simples ?? '';
-    document.getElementById('das-info').textContent = p.das_mei_valor > 0
-      ? `DAS configurado: ${money(p.das_mei_valor)} · vence dia ${p.das_vencimento_dia}`
-      : '⚠ Configure o valor do DAS antes de lançar.';
+    document.getElementById('p-base').value = p.simples_base || 'competencia';
+    mostrarBlocos();
   } catch (e) { toast(e.message, 'err'); }
 }
 
 async function salvarParam() {
+  const simples = document.getElementById('p-regime').value !== 'MEI';
+  const body = {
+    regime: document.getElementById('p-regime').value,
+    das_vencimento_dia: document.getElementById('p-dia').value || 20,
+  };
+  if (simples) {
+    body.aliquota_simples = document.getElementById('p-aliq').value || null;
+    body.simples_base = document.getElementById('p-base').value;
+  } else {
+    body.das_mei_valor = document.getElementById('p-das').value || 0;
+  }
   try {
-    await api('/api/parametros', { method: 'PUT', body: {
-      regime: document.getElementById('p-regime').value,
-      das_mei_valor: document.getElementById('p-das').value || 0,
-      das_vencimento_dia: document.getElementById('p-dia').value || 20,
-      aliquota_simples: document.getElementById('p-aliq').value || null,
-    }});
+    await api('/api/parametros', { method: 'PUT', body });
     toast('Configuração salva!', 'ok');
-    carregarParam();
+    await carregarParam();
+    document.getElementById('d-comp').value = '';
+    previa();
   } catch (e) { toast(e.message, 'err'); }
 }
 
+async function previa() {
+  const comp = document.getElementById('d-comp').value;
+  const box = document.getElementById('das-previa');
+  try {
+    const r = await api('/api/impostos/das/previa' + (comp ? '?competencia=' + comp : ''));
+    if (!comp) document.getElementById('d-comp').value = r.competencia_padrao;
+    const p = r.previa;
+    let html;
+    if (p.regime === 'MEI') {
+      html = p.valor > 0 ? `${escapeHtml(p.descricao)}: <strong>${money(p.valor)}</strong> · vence ${fmtDate(p.vencimento)}`
+                         : '⚠ Configure o valor do DAS-MEI ao lado.';
+    } else if (!p.aliquota) {
+      html = '⚠ Configure a alíquota efetiva do Simples ao lado.';
+    } else {
+      const base = p.base_tipo === 'caixa' ? 'recebido' : 'faturado';
+      html = `${base} em ${fmtMes(p.competencia.slice(0, 7))}: ${money(p.base)} × ${Number(p.aliquota).toLocaleString('pt-BR')}% = <strong>${money(p.valor)}</strong><br>vence ${fmtDate(p.vencimento)}`;
+      if (p.valor <= 0) html += '<br><span class="muted">Sem faturamento nesse mês, nada a lançar.</span>';
+    }
+    if (p.ja_lancado) html += '<br><span class="muted">✓ já lançado</span>';
+    box.innerHTML = html;
+    document.getElementById('btn-das').disabled = p.ja_lancado || !(p.valor > 0);
+  } catch (e) { box.textContent = e.message; }
+}
+document.getElementById('d-comp').addEventListener('change', previa);
+
 async function lancarDas() {
-  const comp = document.getElementById('d-comp').value; // YYYY-MM
+  const comp = document.getElementById('d-comp').value;
   try {
     const r = await api('/api/impostos/das', { method: 'POST', body: comp ? { competencia: comp } : {} });
-    toast((r.descricao || 'DAS') + ' lançado!', 'ok');
-    carregarHist();
+    toast(`${r.descricao} lançado: ${money(r.valor)}`, 'ok');
+    carregarHist(); previa();
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -87,20 +135,34 @@ async function carregarHist() {
   try {
     const { rows } = await api('/api/lancamentos?tipo=imposto');
     const tb = document.getElementById('hist');
-    if (!rows.length) { tb.innerHTML = '<tr><td colspan="4" class="empty">Nenhum imposto lançado.</td></tr>'; return; }
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="5" class="empty">Nenhum imposto lançado.</td></tr>'; return; }
     tb.innerHTML = rows.map(l => `
       <tr>
-        <td>${fmtDate(l.data_competencia)}</td>
+        <td>${fmtMes(l.data_competencia.slice(0, 7))}</td>
         <td>${escapeHtml(l.descricao)}</td>
-        <td>${l.parcelas_pagas >= l.qtd_parcelas ? '<span class="badge pago">pago</span>' : '<span class="badge previsto">em aberto</span>'}</td>
+        <td>${Number(l.parcelas_pagas) >= Number(l.qtd_parcelas) && Number(l.qtd_parcelas) > 0 ? '<span class="badge pago">pago</span>' : '<span class="badge previsto">em aberto</span>'}</td>
         <td class="num">${money(l.valor_total)}</td>
+        <td><div class="acoes"><button class="btn btn-sm btn-danger" onclick="excluir(${l.id})">excluir</button></div></td>
       </tr>`).join('');
   } catch (e) { toast(e.message, 'err'); }
 }
 
-const now = new Date();
-document.getElementById('d-comp').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-carregarParam();
+async function excluir(id) {
+  if (!confirm('Excluir este imposto?')) return;
+  try {
+    await api('/api/lancamentos/' + id, { method: 'DELETE' });
+  } catch (e) {
+    if (e.status === 409 && e.data && e.data.precisa_confirmar) {
+      if (!confirm(`Este imposto já foi pago (${money(e.data.valor_pago)}). Excluir tira o valor do saldo das contas. Excluir mesmo assim?`)) return;
+      try { await api('/api/lancamentos/' + id + '?forcar=1', { method: 'DELETE' }); }
+      catch (e2) { toast(e2.message, 'err'); return; }
+    } else { toast(e.message, 'err'); return; }
+  }
+  toast('Excluído.', 'ok');
+  carregarHist(); previa();
+}
+
+carregarParam().then(previa);
 carregarHist();
 </script>
 </body>

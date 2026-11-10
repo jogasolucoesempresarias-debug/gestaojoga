@@ -12,19 +12,33 @@
 <main class="main">
   <div class="page-head">
     <div><h1>Recorrências</h1><div class="sub">Contratos de receita e custos fixos mensais (MRR)</div></div>
-    <div style="display:flex;gap:8px;align-items:flex-end">
+    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
       <div class="field" style="margin:0"><label>Gerar competência</label><input type="month" id="g-comp"></div>
       <button class="btn" onclick="gerarMes()">↻ Gerar recorrências do mês</button>
       <button class="btn btn-primary" onclick="abrirNovo()">+ Novo contrato</button>
     </div>
   </div>
 
+  <div class="card modo-card">
+    <div>
+      <div class="field" style="margin:0"><label>Geração dos lançamentos</label></div>
+      <div class="segmented">
+        <button id="modo-manual" onclick="setModo('manual')">Manual</button>
+        <button id="modo-automatico" onclick="setModo('automatico')">Automática</button>
+      </div>
+    </div>
+    <div class="txt" id="modo-txt">—</div>
+  </div>
+
   <div class="grid cols-3" style="margin-bottom:18px">
-    <div class="card kpi"><div class="label">MRR (receita)</div><div class="value pos" id="k-rec">—</div></div>
+    <div class="card kpi"><div class="label">MRR (receita)</div><div class="value pos" id="k-rec">—</div><div class="hint">contratos valendo hoje</div></div>
     <div class="card kpi"><div class="label">Custo fixo (mês)</div><div class="value neg" id="k-desp">—</div></div>
     <div class="card kpi"><div class="label">MRR líquido</div><div class="value" id="k-liq">—</div><div class="hint" id="k-arr"></div></div>
   </div>
 
+  <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+    <label class="check"><input type="checkbox" id="f-cancelados" onchange="carregar()"> mostrar cancelados</label>
+  </div>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Descrição</th><th>Cliente/Fornecedor</th><th>Tipo</th><th>Dia</th><th>Vigência</th><th>Status</th><th>Mês atual</th><th class="num">Valor/mês</th><th></th></tr></thead>
@@ -33,11 +47,12 @@
   </div>
 </main>
 
-<!-- Modal novo contrato -->
+<!-- Modal contrato (novo / editar) -->
 <div class="modal-bg" id="modal">
   <div class="modal">
-    <h2>Novo contrato recorrente</h2>
+    <h2 id="m-titulo">Novo contrato recorrente</h2>
     <form id="formCtr">
+      <input type="hidden" id="c-id">
       <div class="row3">
         <div class="field"><label>Tipo *</label>
           <select id="c-tipo" required><option value="receita">Receita</option><option value="despesa">Despesa (custo fixo)</option></select></div>
@@ -46,7 +61,7 @@
       </div>
       <div class="field"><label>Descrição *</label><input type="text" id="c-desc" required placeholder="Ex.: Sustentação de automação — Cliente X"></div>
       <div class="row2">
-        <div class="field"><label>Cliente</label>
+        <div class="field"><label>Cliente / Fornecedor</label>
           <div style="display:flex;gap:6px">
             <select id="c-contato" style="flex:1"></select>
             <button type="button" class="btn btn-sm" onclick="novoContatoInline(document.getElementById('c-contato'))">+ novo</button>
@@ -56,6 +71,12 @@
       <div class="row2">
         <div class="field"><label>Início *</label><input type="date" id="c-inicio" required></div>
         <div class="field"><label>Fim (vazio = indefinido)</label><input type="date" id="c-fim"></div>
+      </div>
+      <label class="check" id="c-aplicar-wrap" style="display:none">
+        <input type="checkbox" id="c-aplicar"> aplicar valor/dia novos também à cobrança deste mês (se ainda não foi paga)
+      </label>
+      <div class="hint muted" id="c-hint-edit" style="display:none;font-size:0.75rem">
+        Mudanças valem para os próximos meses gerados. Meses já gerados ficam como estão (edite em "A pagar / receber").
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" onclick="closeModal('modal')">Cancelar</button>
@@ -68,7 +89,7 @@
 <script src="/static/app.js"></script>
 <script>
 renderShell('/recorrencias');
-let CATS = [], CONTATOS = [];
+let CATS = [], CONTATOS = [], CONTRATOS = [], MODO = 'manual';
 
 async function carregarOpcoes() {
   try {
@@ -79,12 +100,66 @@ async function carregarOpcoes() {
 
 function popularSelects() {
   const tipo = document.getElementById('c-tipo').value;
-  document.getElementById('c-cat').innerHTML = '<option value="">—</option>' +
-    CATS.filter(c => c.tipo === tipo).map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
-  document.getElementById('c-contato').innerHTML = '<option value="">—</option>' +
-    CONTATOS.map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
+  document.getElementById('c-cat').innerHTML = opcoes(CATS.filter(c => c.tipo === tipo));
+  document.getElementById('c-contato').innerHTML = opcoes(CONTATOS);
 }
 document.getElementById('c-tipo').addEventListener('change', popularSelects);
+
+// ── Modo manual × automático ──
+function pintarModo() {
+  document.getElementById('modo-manual').classList.toggle('on', MODO === 'manual');
+  document.getElementById('modo-automatico').classList.toggle('on', MODO === 'automatico');
+  document.getElementById('modo-txt').innerHTML = MODO === 'automatico'
+    ? '<strong>Automática:</strong> todo mês o sistema lança sozinho a cobrança de cada contrato ativo (na primeira vez que alguém abre o app no mês). O botão "Gerar" continua aí para adiantar um mês futuro.'
+    : '<strong>Manual:</strong> os lançamentos do mês só são criados quando você clica em "Gerar recorrências do mês". Até lá, o contrato aparece como <em>pendente</em> (mas já entra nas projeções do Dashboard).';
+}
+
+async function carregarModo() {
+  try {
+    const { parametros: p } = await api('/api/parametros');
+    MODO = p.recorrencia_modo || 'manual';
+    pintarModo();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function setModo(modo) {
+  if (modo === MODO) return;
+  if (modo === 'automatico' && !confirm('Ligar a geração automática? A cobrança do mês atual dos contratos ativos será lançada agora.')) return;
+  try {
+    const r = await api('/api/parametros', { method: 'PUT', body: { recorrencia_modo: modo } });
+    MODO = modo; pintarModo();
+    toast(modo === 'automatico'
+      ? `Automática ligada${r.gerados ? ` — ${r.gerados} lançamento(s) gerado(s) agora` : ''}.`
+      : 'Geração manual: use o botão para lançar cada mês.', 'ok');
+    carregar();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── Lista ──
+function celulaMes(c) {
+  if (c.status !== 'ativo') return '<span class="muted">—</span>';
+  if (!c.vigente_mes_atual) {
+    return new Date(c.data_inicio + 'T00:00:00') > new Date()
+      ? `<span class="muted">começa ${fmtDate(c.data_inicio)}</span>` : '<span class="muted">encerrado</span>';
+  }
+  if (c.gerado_mes_atual) return '<span class="badge pago">gerado</span>';
+  if (c.pulado_mes_atual) return `<span class="badge cancelado" title="O lançamento deste mês foi excluído">pulado</span>
+    <button class="btn btn-sm btn-ghost" onclick="gerarUm(${c.id})">gerar</button>`;
+  return `<span class="badge atrasado">pendente</span>
+    <button class="btn btn-sm btn-ghost" onclick="gerarUm(${c.id})">gerar</button>`;
+}
+
+function acoes(c) {
+  if (c.status === 'cancelado') {
+    return `<button class="btn btn-sm btn-ghost" onclick="mudarStatus(${c.id},'ativo')">reativar</button>` +
+      (Number(c.qtd_lancamentos) === 0 ? `<button class="btn btn-sm btn-danger" onclick="excluirDefinitivo(${c.id})">excluir</button>` : '');
+  }
+  return `<button class="btn btn-sm btn-ghost" onclick="abrirEditar(${c.id})">editar</button>` +
+    (c.status === 'ativo'
+      ? `<button class="btn btn-sm btn-ghost" onclick="mudarStatus(${c.id},'pausado')">pausar</button>`
+      : `<button class="btn btn-sm btn-ghost" onclick="mudarStatus(${c.id},'ativo')">ativar</button>`) +
+    `<button class="btn btn-sm btn-danger" onclick="cancelar(${c.id})">cancelar</button>`;
+}
 
 async function carregar() {
   try {
@@ -98,71 +173,118 @@ async function carregar() {
   } catch (e) { /* silencioso */ }
 
   try {
-    const { rows } = await api('/api/contratos');
+    const todos = document.getElementById('f-cancelados').checked ? '?todos=1' : '';
+    const { rows } = await api('/api/contratos' + todos);
+    CONTRATOS = rows;
     const tb = document.getElementById('lista');
     if (!rows.length) { tb.innerHTML = '<tr><td colspan="9" class="empty">Nenhum contrato. Crie o primeiro contrato recorrente.</td></tr>'; return; }
     tb.innerHTML = rows.map(c => `
-      <tr>
+      <tr class="${c.status === 'cancelado' ? 'inativo' : ''}">
         <td>${escapeHtml(c.descricao)}</td>
         <td>${c.contato_nome ? escapeHtml(c.contato_nome) : '<span class="muted">—</span>'}</td>
         <td><span class="badge ${c.tipo}">${c.tipo}</span></td>
         <td>${c.dia_vencimento}</td>
         <td>${fmtDate(c.data_inicio)} → ${c.data_fim ? fmtDate(c.data_fim) : '<span class="muted">indef.</span>'}</td>
         <td><span class="badge ${c.status === 'ativo' ? 'pago' : (c.status === 'pausado' ? 'previsto' : 'cancelado')}">${c.status}</span></td>
-        <td>${c.gerado_mes_atual ? '<span class="badge pago">gerado</span>' : '<span class="badge atrasado">pendente</span>'}</td>
+        <td style="white-space:nowrap">${celulaMes(c)}</td>
         <td class="num">${money(c.valor_mensal)}</td>
-        <td class="num" style="white-space:nowrap">
-          ${c.status === 'ativo'
-            ? `<button class="btn btn-sm btn-ghost" onclick="mudarStatus(${c.id},'pausado')">pausar</button>`
-            : (c.status === 'pausado' ? `<button class="btn btn-sm btn-ghost" onclick="mudarStatus(${c.id},'ativo')">ativar</button>` : '')}
-          <button class="btn btn-sm btn-danger" onclick="cancelar(${c.id})">cancelar</button>
-        </td>
+        <td><div class="acoes">${acoes(c)}</div></td>
       </tr>`).join('');
   } catch (e) { toast(e.message, 'err'); }
 }
 
+// ── Modal novo / editar ──
 function abrirNovo() {
   document.getElementById('formCtr').reset();
+  document.getElementById('c-id').value = '';
+  document.getElementById('m-titulo').textContent = 'Novo contrato recorrente';
+  document.getElementById('c-tipo').disabled = false;
   document.getElementById('c-inicio').value = hoje();
   document.getElementById('c-dia').value = 10;
+  document.getElementById('c-aplicar-wrap').style.display = 'none';
+  document.getElementById('c-hint-edit').style.display = 'none';
   popularSelects();
+  openModal('modal');
+}
+
+function abrirEditar(id) {
+  const c = CONTRATOS.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('formCtr').reset();
+  document.getElementById('c-id').value = c.id;
+  document.getElementById('m-titulo').textContent = 'Editar contrato';
+  document.getElementById('c-tipo').value = c.tipo;
+  document.getElementById('c-tipo').disabled = true;
+  popularSelects();
+  document.getElementById('c-valor').value = c.valor_mensal;
+  document.getElementById('c-dia').value = c.dia_vencimento;
+  document.getElementById('c-desc').value = c.descricao;
+  selecionar('c-contato', c.contato_id, c.contato_nome);
+  selecionar('c-cat', c.categoria_id, c.categoria_nome);
+  document.getElementById('c-inicio').value = c.data_inicio;
+  document.getElementById('c-fim').value = c.data_fim || '';
+  document.getElementById('c-aplicar-wrap').style.display = c.gerado_mes_atual ? '' : 'none';
+  document.getElementById('c-hint-edit').style.display = '';
   openModal('modal');
 }
 
 document.getElementById('formCtr').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = document.getElementById('btnSalvar');
+  const id = document.getElementById('c-id').value;
   btn.disabled = true; btn.textContent = 'Salvando…';
+  const body = {
+    descricao: document.getElementById('c-desc').value,
+    valor_mensal: document.getElementById('c-valor').value,
+    dia_vencimento: document.getElementById('c-dia').value,
+    data_inicio: document.getElementById('c-inicio').value,
+    data_fim: document.getElementById('c-fim').value || null,
+    contato_id: document.getElementById('c-contato').value || null,
+    categoria_id: document.getElementById('c-cat').value || null,
+  };
   try {
-    await api('/api/contratos', { method: 'POST', body: {
-      tipo: document.getElementById('c-tipo').value,
-      descricao: document.getElementById('c-desc').value,
-      valor_mensal: document.getElementById('c-valor').value,
-      dia_vencimento: document.getElementById('c-dia').value,
-      data_inicio: document.getElementById('c-inicio').value,
-      data_fim: document.getElementById('c-fim').value || null,
-      contato_id: document.getElementById('c-contato').value || null,
-      categoria_id: document.getElementById('c-cat').value || null,
-    }});
-    toast('Contrato criado!', 'ok');
+    let r;
+    if (id) {
+      body.aplicar_mes_atual = document.getElementById('c-aplicar').checked;
+      r = await api('/api/contratos/' + id, { method: 'PUT', body });
+      toast('Contrato atualizado!', 'ok');
+    } else {
+      body.tipo = document.getElementById('c-tipo').value;
+      r = await api('/api/contratos', { method: 'POST', body });
+      toast(r.gerados ? `Contrato criado e cobrança do mês lançada.` : 'Contrato criado!', 'ok');
+    }
     closeModal('modal');
     carregar();
   } catch (e) { toast(e.message, 'err'); }
   btn.disabled = false; btn.textContent = 'Salvar contrato';
 });
 
+// ── Ações ──
 async function gerarMes() {
   const comp = document.getElementById('g-comp').value;
   try {
     const r = await api('/api/contratos/gerar', { method: 'POST', body: comp ? { competencia: comp } : {} });
-    toast(r.gerados > 0 ? `${r.gerados} lançamento(s) gerado(s) para ${r.competencia}.` : `Nada a gerar em ${r.competencia} (já estava tudo lançado).`, 'ok');
+    let msg = r.gerados > 0 ? `${r.gerados} lançamento(s) gerado(s) para ${r.competencia}.` : `Nada a gerar em ${r.competencia} (já estava tudo lançado).`;
+    if (r.pulados) msg += ` ${r.pulados} contrato(s) com o mês pulado — use "gerar" na linha para incluir.`;
+    toast(msg, 'ok');
+    carregar();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function gerarUm(id) {
+  try {
+    const r = await api('/api/contratos/' + id + '/gerar', { method: 'POST', body: {} });
+    toast(`Cobrança de ${r.competencia} lançada.`, 'ok');
     carregar();
   } catch (e) { toast(e.message, 'err'); }
 }
 
 async function mudarStatus(id, status) {
-  try { await api('/api/contratos/' + id, { method: 'PUT', body: { status } }); toast('Atualizado.', 'ok'); carregar(); }
-  catch (e) { toast(e.message, 'err'); }
+  try {
+    const r = await api('/api/contratos/' + id, { method: 'PUT', body: { status } });
+    toast(r.gerados ? 'Contrato ativo — cobrança do mês lançada.' : 'Atualizado.', 'ok');
+    carregar();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 async function cancelar(id) {
@@ -171,9 +293,15 @@ async function cancelar(id) {
   catch (e) { toast(e.message, 'err'); }
 }
 
-const now = new Date();
-document.getElementById('g-comp').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+async function excluirDefinitivo(id) {
+  if (!confirm('Excluir este contrato de vez? (Só é possível porque ele nunca gerou lançamento.)')) return;
+  try { await api('/api/contratos/' + id + '?definitivo=1', { method: 'DELETE' }); toast('Contrato excluído.', 'ok'); carregar(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+document.getElementById('g-comp').value = mesAtual();
 carregarOpcoes();
+carregarModo();
 carregar();
 </script>
 </body>

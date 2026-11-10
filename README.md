@@ -29,7 +29,9 @@ Mesma stack e padrão de deploy do app Multpel (Flask + Docker Swarm + Traefik +
 ```
 GestaoJoga/
 ├── server.py                 # Backend Flask (auth + módulo financeiro)
-├── init_db.py                # Schema idempotente + seed usuários/categorias
+├── schema.py                 # Schema idempotente + seeds (roda sozinho no boot do servidor)
+├── init_db.py                # Roda o schema.py à mão (ambiente novo)
+├── tests/                    # pytest — banco próprio gestao_joga_test (roda no CI antes do build)
 ├── _create_db.py             # Cria o database local (quando psql não está no PATH)
 ├── _smoke.py                 # Smoke test end-to-end da API (não deixa resíduo)
 ├── requirements.txt
@@ -57,12 +59,17 @@ Separa **competência** (quando a receita/despesa nasce) de **caixa/vencimento**
 - `contas` — caixa e bancos (saldo inicial + movimentos)
 - `lancamentos` — competência (tipo, valor, NF, categoria, contato)
 - `parcelas` — caixa (vencimento, status previsto/pago/cancelado; `atrasado` é derivado)
-- `parametros` — DAS-MEI fixo + dia de vencimento + alíquota Simples (preparada p/ virada ME)
+- `parametros` — regime (MEI = DAS fixo; Simples = alíquota efetiva × faturamento do mês), modo da recorrência
+- `contratos` — recorrências (MRR); `contrato_pulos` = meses que não devem gerar cobrança
+- `transferencias` — dinheiro movido entre contas (não é receita nem despesa)
+- `historico` — quem editou/excluiu/estornou o quê (com o "antes" em JSON)
 
 **Cálculos** (derivados em query, sem cron):
-- Saldo atual = Σ saldo inicial das contas ± parcelas pagas
-- A receber/pagar (30/60/90d) = parcelas previstas por janela de vencimento
+- Saldo atual = Σ contas ativas (saldo inicial ± baixas pelo valor pago ± transferências)
+- A receber/pagar (30/60/90d) = parcelas previstas + cobranças de contratos ainda não geradas
 - Fluxo projetado = entradas − saídas previstas por mês, acumulado a partir do saldo
+- Recorrência: modo **manual** (botão) ou **automático** (gera o mês na 1ª requisição do dia,
+  desde o mês em que o modo foi ligado). Excluir um lançamento gerado marca o mês como pulado.
 
 ---
 
@@ -87,17 +94,18 @@ $env:DEV="1"; .\.venv\Scripts\python.exe -X utf8 server.py
 Acesse http://localhost:5000 → login `ggabriel.milho@gmail.com` / `joga123`
 (troca de senha obrigatória no 1º acesso).
 
-Smoke test da API (sobe nada no banco — limpa os dados de teste ao final):
+Testes (criam e usam o banco `gestao_joga_test`, nunca o de dev):
 ```powershell
-.\.venv\Scripts\python.exe -X utf8 _smoke.py
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests -q
 ```
 
 ---
 
 ## 🚀 Deploy produção
 
-Fluxo: `git push main` → GitHub Actions builda e publica a imagem no GHCR →
-no servidor, Portainer/Swarm faz `pull` + `service update`.
+Fluxo: `git push main` → GitHub Actions roda os testes, builda e publica a imagem no GHCR →
+no servidor, Portainer/Swarm faz `pull` + `service update`. Ao subir, o servidor migra o banco
+sozinho (cria tabela/coluna que falta, com `lock_timeout` curto) — não precisa rodar `init_db.py`.
 
 ### Primeira vez
 1. **PostgreSQL**: criar database `gestao_joga` no Postgres compartilhado do Swarm

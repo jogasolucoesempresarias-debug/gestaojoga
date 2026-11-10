@@ -41,11 +41,19 @@
 
 <!-- Modal pagar -->
 <div class="modal-bg" id="modalPagar">
-  <div class="modal" style="max-width:440px">
+  <div class="modal" style="max-width:460px">
     <h2 id="pg-titulo">Liquidar parcela</h2>
     <input type="hidden" id="pg-id">
-    <div class="field"><label>Data do pagamento</label><input type="date" id="pg-data"></div>
-    <div class="field"><label>Conta / caixa</label><select id="pg-conta"></select></div>
+    <div class="info-box" id="pg-resumo"></div>
+    <div class="row2">
+      <div class="field"><label>Data do pagamento</label><input type="date" id="pg-data"></div>
+      <div class="field"><label>Valor pago (R$)</label><input type="number" id="pg-valor" step="0.01" min="0.01"></div>
+    </div>
+    <div class="hint muted" id="pg-dif" style="font-size:0.78rem;margin:-6px 0 10px"></div>
+    <label class="check" id="pg-restante-wrap" style="display:none">
+      <input type="checkbox" id="pg-restante" checked> deixar o restante em aberto (pagamento parcial)
+    </label>
+    <div class="field"><label>Conta / caixa *</label><select id="pg-conta"></select></div>
     <div class="field"><label>Forma de pagamento</label><input type="text" id="pg-forma" placeholder="Pix, boleto…"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('modalPagar')">Cancelar</button>
@@ -54,16 +62,47 @@
   </div>
 </div>
 
+<!-- Modal editar parcela -->
+<div class="modal-bg" id="modalEditar">
+  <div class="modal" style="max-width:460px">
+    <h2>Editar parcela</h2>
+    <input type="hidden" id="ed-id">
+    <div class="info-box" id="ed-resumo"></div>
+    <div class="row2">
+      <div class="field"><label>Valor (R$)</label><input type="number" id="ed-valor" step="0.01" min="0.01"></div>
+      <div class="field"><label>Vencimento</label><input type="date" id="ed-venc"></div>
+    </div>
+    <div class="field"><label>Conta / caixa</label><select id="ed-conta"></select></div>
+    <div class="field"><label>Forma de pagamento</label><input type="text" id="ed-forma"></div>
+    <div class="field"><label>Observação</label><textarea id="ed-obs" rows="2"></textarea></div>
+    <div class="hint muted" style="font-size:0.75rem">Mudar o valor atualiza o total do lançamento.</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalEditar')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarEdicao()">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <script src="/static/app.js"></script>
 <script>
 renderShell('/contas');
-let DIR = 'receber', CONTAS = [];
+let DIR = 'receber', CONTAS = [], ROWS = [];
 
 function setDir(d, btn) {
   DIR = d;
   document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   carregar();
+}
+
+const valorEfetivo = r => Number(r.valor_pago ?? r.valor);
+
+function acoesLinha(r, verbo) {
+  if (r.status === 'pago') return `<button class="btn btn-sm btn-ghost" onclick="estornar(${r.id})">estornar</button>`;
+  if (r.status === 'cancelado') return `<button class="btn btn-sm btn-ghost" onclick="reativar(${r.id})">reativar</button>`;
+  return `<button class="btn btn-sm btn-primary" onclick="abrirPagar(${r.id}, '${verbo}')">${verbo}</button>
+    <button class="btn btn-sm btn-ghost" onclick="abrirEditar(${r.id})">editar</button>
+    <button class="btn btn-sm btn-danger" onclick="cancelarParcela(${r.id})">cancelar</button>`;
 }
 
 async function carregar() {
@@ -73,9 +112,10 @@ async function carregar() {
   const ate = document.getElementById('f-ate').value; if (ate) p.set('ate', ate);
   try {
     const { rows } = await api('/api/parcelas?' + p.toString());
+    ROWS = rows;
     let aberto = 0, vencidos = 0, pago = 0;
     rows.forEach(r => {
-      if (r.status_efetivo === 'pago') pago += Number(r.valor);
+      if (r.status_efetivo === 'pago') pago += valorEfetivo(r);
       else if (r.status_efetivo === 'cancelado') { /* ignora */ }
       else { aberto += Number(r.valor); if (r.status_efetivo === 'atrasado') vencidos += Number(r.valor); }
     });
@@ -87,36 +127,61 @@ async function carregar() {
     const tb = document.getElementById('lista');
     if (!rows.length) { tb.innerHTML = '<tr><td colspan="7" class="empty">Nenhuma parcela.</td></tr>'; return; }
     tb.innerHTML = rows.map(r => `
-      <tr>
+      <tr class="${r.status === 'cancelado' ? 'inativo' : ''}">
         <td>${fmtDate(r.data_vencimento)}</td>
-        <td>${escapeHtml(r.descricao)}${r.num_nf ? ' <span class="muted">NF ' + escapeHtml(r.num_nf) + '</span>' : ''}</td>
+        <td>${escapeHtml(r.descricao)}${r.num_nf ? ' <span class="muted">NF ' + escapeHtml(r.num_nf) + '</span>' : ''}${r.observacao ? '<div class="muted" style="font-size:0.75rem">' + escapeHtml(r.observacao) + '</div>' : ''}</td>
         <td>${r.contato_nome ? escapeHtml(r.contato_nome) : '<span class="muted">—</span>'}</td>
         <td>${r.numero}</td>
-        <td><span class="badge ${r.status_efetivo}">${r.status_efetivo}</span>${r.data_pagamento ? ' <span class="muted">' + fmtDate(r.data_pagamento) + '</span>' : ''}</td>
-        <td class="num">${money(r.valor)}</td>
-        <td class="num">${r.status === 'pago'
-          ? `<button class="btn btn-sm btn-ghost" onclick="estornar(${r.id})">estornar</button>`
-          : `<button class="btn btn-sm btn-primary" onclick="abrirPagar(${r.id}, '${verbo}')">${verbo}</button>`}</td>
+        <td><span class="badge ${r.status_efetivo}">${r.status_efetivo}</span>${r.data_pagamento ? ' <span class="muted">' + fmtDate(r.data_pagamento) + (r.conta_nome ? ' · ' + escapeHtml(r.conta_nome) : '') + '</span>' : ''}</td>
+        <td class="num">${money(r.valor)}${r.valor_pago != null ? '<div class="muted" style="font-size:0.75rem">pago ' + money(r.valor_pago) + '</div>' : ''}</td>
+        <td><div class="acoes">${acoesLinha(r, verbo)}</div></td>
       </tr>`).join('');
   } catch (e) { toast(e.message, 'err'); }
 }
 
+// ── Baixa ──
 function abrirPagar(id, verbo) {
+  const r = ROWS.find(x => x.id === id);
   document.getElementById('pg-id').value = id;
   document.getElementById('pg-titulo').textContent = verbo + ' parcela';
+  document.getElementById('pg-resumo').innerHTML = `${escapeHtml(r.descricao)} · parcela ${r.numero}<br>Vencimento ${fmtDate(r.data_vencimento)} · <strong>${money(r.valor)}</strong>`;
   document.getElementById('pg-data').value = hoje();
-  document.getElementById('pg-conta').innerHTML = '<option value="">—</option>' +
-    CONTAS.map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('');
-  document.getElementById('pg-forma').value = '';
+  document.getElementById('pg-valor').value = Number(r.valor).toFixed(2);
+  document.getElementById('pg-conta').innerHTML = opcoes(CONTAS, null);
+  if (r.conta_id) selecionar('pg-conta', r.conta_id, r.conta_nome);
+  document.getElementById('pg-forma').value = r.forma_pagamento || '';
+  document.getElementById('pg-restante').checked = true;
+  atualizarDif();
   openModal('modalPagar');
 }
 
+function atualizarDif() {
+  const r = ROWS.find(x => x.id === Number(document.getElementById('pg-id').value));
+  if (!r) return;
+  const pago = parseFloat(document.getElementById('pg-valor').value || '0');
+  const dif = Math.round((pago - Number(r.valor)) * 100) / 100;
+  const box = document.getElementById('pg-dif');
+  const wrap = document.getElementById('pg-restante-wrap');
+  wrap.style.display = dif < 0 ? '' : 'none';
+  if (!pago || dif === 0) box.textContent = '';
+  else if (dif > 0) box.textContent = `${money(dif)} a mais que o previsto (juros/multa).`;
+  else box.textContent = document.getElementById('pg-restante').checked
+    ? `${money(-dif)} ficam em aberto numa nova parcela, com o mesmo vencimento.`
+    : `${money(-dif)} a menos, tratado como desconto (nada fica em aberto).`;
+}
+document.getElementById('pg-valor').addEventListener('input', atualizarDif);
+document.getElementById('pg-restante').addEventListener('change', atualizarDif);
+
 async function confirmarPagar() {
   const id = document.getElementById('pg-id').value;
+  const conta = document.getElementById('pg-conta').value;
+  if (!conta) { toast('Escolha a conta onde o dinheiro entrou/saiu.', 'err'); return; }
   try {
     await api('/api/parcelas/' + id + '/pagar', { method: 'POST', body: {
       data_pagamento: document.getElementById('pg-data').value,
-      conta_id: document.getElementById('pg-conta').value || null,
+      valor_pago: document.getElementById('pg-valor').value || null,
+      restante_em_aberto: document.getElementById('pg-restante').checked,
+      conta_id: conta,
       forma_pagamento: document.getElementById('pg-forma').value || null,
     }});
     toast('Parcela liquidada!', 'ok');
@@ -125,9 +190,50 @@ async function confirmarPagar() {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+// ── Edição ──
+function abrirEditar(id) {
+  const r = ROWS.find(x => x.id === id);
+  document.getElementById('ed-id').value = id;
+  document.getElementById('ed-resumo').innerHTML = `${escapeHtml(r.descricao)} · parcela ${r.numero}`;
+  document.getElementById('ed-valor').value = Number(r.valor).toFixed(2);
+  document.getElementById('ed-venc').value = r.data_vencimento;
+  document.getElementById('ed-conta').innerHTML = opcoes(CONTAS);
+  selecionar('ed-conta', r.conta_id, r.conta_nome);
+  document.getElementById('ed-forma').value = r.forma_pagamento || '';
+  document.getElementById('ed-obs').value = r.observacao || '';
+  openModal('modalEditar');
+}
+
+async function salvarEdicao() {
+  const id = document.getElementById('ed-id').value;
+  try {
+    await api('/api/parcelas/' + id, { method: 'PUT', body: {
+      valor: document.getElementById('ed-valor').value,
+      data_vencimento: document.getElementById('ed-venc').value,
+      conta_id: document.getElementById('ed-conta').value || null,
+      forma_pagamento: document.getElementById('ed-forma').value || null,
+      observacao: document.getElementById('ed-obs').value || null,
+    }});
+    toast('Parcela atualizada!', 'ok');
+    closeModal('modalEditar');
+    carregar();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 async function estornar(id) {
-  if (!confirm('Estornar este pagamento? A parcela volta para previsto.')) return;
+  if (!confirm('Estornar este pagamento? A parcela volta para em aberto.')) return;
   try { await api('/api/parcelas/' + id + '/estornar', { method: 'POST' }); toast('Estornado.', 'ok'); carregar(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+async function cancelarParcela(id) {
+  if (!confirm('Cancelar esta parcela? Ela sai do previsto e o total do lançamento diminui. Dá para reativar depois.')) return;
+  try { await api('/api/parcelas/' + id + '/cancelar', { method: 'POST' }); toast('Parcela cancelada.', 'ok'); carregar(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+async function reativar(id) {
+  try { await api('/api/parcelas/' + id + '/reativar', { method: 'POST' }); toast('Parcela reativada.', 'ok'); carregar(); }
   catch (e) { toast(e.message, 'err'); }
 }
 

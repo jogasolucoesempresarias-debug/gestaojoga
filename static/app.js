@@ -15,7 +15,11 @@ async function api(url, opts = {}) {
     if (j.redirect) { window.location.href = j.redirect; throw new Error(j.error || 'Acesso negado'); }
   }
   const j = await r.json().catch(() => ({ ok: false, error: 'Resposta inválida' }));
-  if (!r.ok || j.ok === false) throw new Error(j.error || `Erro ${r.status}`);
+  if (!r.ok || j.ok === false) {
+    const err = new Error(j.error || `Erro ${r.status}`);
+    err.status = r.status; err.data = j;
+    throw err;
+  }
   return j;
 }
 
@@ -37,7 +41,20 @@ function fmtMesAno(ym) {
   const meses = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
   return `${meses[parseInt(m, 10) - 1]}/${a.slice(2)}`;
 }
-function hoje() { return new Date().toISOString().slice(0, 10); }
+function hoje() {
+  // data LOCAL (toISOString usa UTC e vira o dia depois das 21h no Brasil)
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function mesAtual(delta = 0) {
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + delta);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function fmtMes(ym) { const [a, m] = ym.split('-'); return `${m}/${a}`; }
+function opcoes(lista, vazio = '—', rotulo = x => x.nome) {
+  return (vazio !== null ? `<option value="">${vazio}</option>` : '') +
+    lista.map(x => `<option value="${x.id}">${escapeHtml(rotulo(x))}</option>`).join('');
+}
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -76,7 +93,7 @@ function renderShell(active) {
       <div><div class="name">Gestão JOGA</div><div class="sub">financeiro</div></div>
     </div>
     <nav class="nav">${links}</nav>
-    <div class="foot"><span id="nav-user">—</span> · <a href="/logout">sair</a></div>`;
+    <div class="foot"><span id="nav-user">—</span> · <a href="/trocar-senha" class="link-senha">senha</a> · <a href="/logout">sair</a></div>`;
   document.body.prepend(sb);
   api('/api/me').then(j => {
     const el = document.getElementById('nav-user');
@@ -156,4 +173,15 @@ function novoContatoInline(selectEl) {
   document.getElementById('formNovoCliente').reset();
   openModal('modalNovoCliente');
   setTimeout(() => document.getElementById('nc-nome').focus(), 50);
+}
+
+// Seleciona um id no <select>; se o item foi excluído (inativo) e não está na lista, inclui para não perder o vínculo
+function selecionar(sel, id, nome) {
+  if (typeof sel === 'string') sel = document.getElementById(sel);
+  if (id && ![...sel.options].some(o => String(o.value) === String(id))) {
+    const o = document.createElement('option');
+    o.value = id; o.textContent = (nome || ('#' + id)) + ' (inativo)';
+    sel.appendChild(o);
+  }
+  sel.value = id || '';
 }

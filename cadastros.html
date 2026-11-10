@@ -64,12 +64,54 @@
     <div class="table-wrap"><table>
       <thead><tr><th>Conta</th><th class="num">Saldo inicial</th><th class="num">Saldo atual</th><th></th></tr></thead>
       <tbody id="lista-conta"></tbody></table></div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:26px 0 12px">
+      <h2 class="section-title" style="margin:0">Transferências entre contas</h2>
+      <button class="btn" onclick="abrirTransf()">⇄ Nova transferência</button>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Data</th><th>De</th><th>Para</th><th>Descrição</th><th class="num">Valor</th><th></th></tr></thead>
+      <tbody id="lista-transf"></tbody></table></div>
   </section>
 </main>
+
+<!-- Modal edição (categoria / cliente / conta) -->
+<div class="modal-bg" id="modalEdit">
+  <div class="modal" style="max-width:480px">
+    <h2 id="ed-titulo">Editar</h2>
+    <div id="ed-campos"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalEdit')">Cancelar</button>
+      <button class="btn btn-primary" id="ed-salvar">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal transferência -->
+<div class="modal-bg" id="modalTransf">
+  <div class="modal" style="max-width:460px">
+    <h2>Transferir entre contas</h2>
+    <div class="row2">
+      <div class="field"><label>De *</label><select id="tr-origem"></select></div>
+      <div class="field"><label>Para *</label><select id="tr-destino"></select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Valor (R$) *</label><input type="number" id="tr-valor" step="0.01" min="0.01"></div>
+      <div class="field"><label>Data</label><input type="date" id="tr-data"></div>
+    </div>
+    <div class="field"><label>Descrição</label><input type="text" id="tr-desc" placeholder="Ex.: saque para o caixa"></div>
+    <div class="hint muted" style="font-size:0.75rem">Não é receita nem despesa: só move o dinheiro de uma conta para outra.</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modalTransf')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarTransf()">Transferir</button>
+    </div>
+  </div>
+</div>
 
 <script src="/static/app.js"></script>
 <script>
 renderShell('/cadastros');
+let CATS = [], CONTATOS = [], CONTAS = [];
 
 function setTab(t, btn) {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
@@ -77,13 +119,18 @@ function setTab(t, btn) {
   ['cat', 'contato', 'conta'].forEach(x => document.getElementById('tab-' + x).style.display = x === t ? '' : 'none');
 }
 
+const botoes = (recurso, id, reload) => `<div class="acoes">
+  <button class="btn btn-sm btn-ghost" onclick="editar('${recurso}', ${id})">editar</button>
+  <button class="btn btn-sm btn-danger" onclick="delItem('${recurso}', ${id}, ${reload})">excluir</button></div>`;
+
 // ── Categorias ──
 async function loadCat() {
   const { rows } = await api('/api/categorias');
+  CATS = rows;
   document.getElementById('lista-cat').innerHTML = rows.map(c => `
     <tr><td>${escapeHtml(c.nome)}</td><td><span class="badge ${c.tipo}">${c.tipo}</span></td>
-    <td><span class="dot" style="background:${c.cor}"></span>${c.cor}</td>
-    <td class="num"><button class="btn btn-sm btn-danger" onclick="delItem('categorias',${c.id},loadCat)">excluir</button></td></tr>`).join('')
+    <td><span class="dot" style="background:${escapeHtml(c.cor)}"></span>${escapeHtml(c.cor)}</td>
+    <td>${botoes('categorias', c.id, 'loadCat')}</td></tr>`).join('')
     || '<tr><td colspan="4" class="empty">Nenhuma categoria.</td></tr>';
 }
 async function addCat() {
@@ -100,11 +147,12 @@ async function addCat() {
 // ── Contatos ──
 async function loadContato() {
   const { rows } = await api('/api/contatos');
+  CONTATOS = rows;
   document.getElementById('lista-contato').innerHTML = rows.map(c => `
     <tr><td>${escapeHtml(c.nome)}</td><td><span class="badge previsto">${c.tipo}</span></td>
     <td>${c.documento ? escapeHtml(c.documento) : '<span class="muted">—</span>'}</td>
     <td>${[c.email, c.telefone].filter(Boolean).map(escapeHtml).join(' · ') || '<span class="muted">—</span>'}</td>
-    <td class="num"><button class="btn btn-sm btn-danger" onclick="delItem('contatos',${c.id},loadContato)">excluir</button></td></tr>`).join('')
+    <td>${botoes('contatos', c.id, 'loadContato')}</td></tr>`).join('')
     || '<tr><td colspan="5" class="empty">Nenhum contato.</td></tr>';
 }
 async function addContato() {
@@ -122,10 +170,11 @@ async function addContato() {
 // ── Contas ──
 async function loadConta() {
   const { rows } = await api('/api/contas');
+  CONTAS = rows;
   document.getElementById('lista-conta').innerHTML = rows.map(c => `
     <tr><td>${escapeHtml(c.nome)}</td><td class="num">${money(c.saldo_inicial)}</td>
     <td class="num"><strong>${money(c.saldo_atual)}</strong></td>
-    <td class="num"><button class="btn btn-sm btn-danger" onclick="delItem('contas',${c.id},loadConta)">excluir</button></td></tr>`).join('')
+    <td>${botoes('contas', c.id, 'loadConta')}</td></tr>`).join('')
     || '<tr><td colspan="4" class="empty">Nenhuma conta.</td></tr>';
 }
 async function addConta() {
@@ -139,13 +188,97 @@ async function addConta() {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+// ── Edição genérica ──
+const FORMS = {
+  categorias: { titulo: 'Editar categoria', lista: () => CATS, reload: () => loadCat(), campos: [
+    { k: 'nome', label: 'Nome', tipo: 'text' },
+    { k: 'cor', label: 'Cor', tipo: 'color' },
+  ]},
+  contatos: { titulo: 'Editar cliente / fornecedor', lista: () => CONTATOS, reload: () => loadContato(), campos: [
+    { k: 'nome', label: 'Nome', tipo: 'text' },
+    { k: 'tipo', label: 'Tipo', tipo: 'select', opcoes: [['cliente', 'Cliente'], ['fornecedor', 'Fornecedor'], ['ambos', 'Ambos']] },
+    { k: 'documento', label: 'CNPJ / CPF', tipo: 'text' },
+    { k: 'email', label: 'E-mail', tipo: 'email' },
+    { k: 'telefone', label: 'Telefone', tipo: 'text' },
+  ]},
+  contas: { titulo: 'Editar conta', lista: () => CONTAS, reload: () => { loadConta(); loadTransf(); }, campos: [
+    { k: 'nome', label: 'Nome', tipo: 'text' },
+    { k: 'saldo_inicial', label: 'Saldo inicial (R$)', tipo: 'number',
+      hint: 'Saldo da conta no dia em que começou a usar o sistema. Para mover dinheiro entre contas, use uma transferência.' },
+  ]},
+};
+
+function editar(recurso, id) {
+  const f = FORMS[recurso];
+  const item = f.lista().find(x => x.id === id);
+  if (!item) return;
+  document.getElementById('ed-titulo').textContent = f.titulo;
+  document.getElementById('ed-campos').innerHTML = f.campos.map(c => {
+    const v = item[c.k] == null ? '' : item[c.k];
+    const input = c.tipo === 'select'
+      ? `<select id="ed-${c.k}">${c.opcoes.map(([val, lab]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${lab}</option>`).join('')}</select>`
+      : `<input type="${c.tipo}" id="ed-${c.k}" value="${escapeHtml(v)}" ${c.tipo === 'number' ? 'step="0.01"' : ''} ${c.tipo === 'color' ? 'style="height:42px;padding:4px"' : ''}>`;
+    return `<div class="field"><label>${c.label}</label>${input}${c.hint ? `<div class="hint">${c.hint}</div>` : ''}</div>`;
+  }).join('');
+  document.getElementById('ed-salvar').onclick = async () => {
+    const body = {};
+    f.campos.forEach(c => { body[c.k] = document.getElementById('ed-' + c.k).value; });
+    try {
+      await api(`/api/${recurso}/${id}`, { method: 'PUT', body });
+      toast('Atualizado!', 'ok'); closeModal('modalEdit'); f.reload();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  openModal('modalEdit');
+}
+
 async function delItem(recurso, id, reload) {
-  if (!confirm('Excluir este item? (fica inativo, sem afetar histórico)')) return;
+  if (!confirm('Excluir este item? (fica inativo, sem afetar o histórico)')) return;
   try { await api('/api/' + recurso + '/' + id, { method: 'DELETE' }); toast('Excluído.', 'ok'); reload(); }
   catch (e) { toast(e.message, 'err'); }
 }
 
-loadCat(); loadContato(); loadConta();
+// ── Transferências ──
+async function loadTransf() {
+  const { rows } = await api('/api/transferencias');
+  document.getElementById('lista-transf').innerHTML = rows.map(t => `
+    <tr><td>${fmtDate(t.data)}</td><td>${escapeHtml(t.origem_nome)}</td><td>${escapeHtml(t.destino_nome)}</td>
+    <td>${t.descricao ? escapeHtml(t.descricao) : '<span class="muted">—</span>'}</td>
+    <td class="num">${money(t.valor)}</td>
+    <td><div class="acoes"><button class="btn btn-sm btn-danger" onclick="delTransf(${t.id})">excluir</button></div></td></tr>`).join('')
+    || '<tr><td colspan="6" class="empty">Nenhuma transferência.</td></tr>';
+}
+
+function abrirTransf() {
+  if (CONTAS.length < 2) { toast('Cadastre pelo menos duas contas para transferir.', 'err'); return; }
+  document.getElementById('tr-origem').innerHTML = opcoes(CONTAS, null, c => `${c.nome} (${money(c.saldo_atual)})`);
+  document.getElementById('tr-destino').innerHTML = opcoes(CONTAS, null, c => `${c.nome} (${money(c.saldo_atual)})`);
+  document.getElementById('tr-destino').selectedIndex = 1;
+  document.getElementById('tr-valor').value = '';
+  document.getElementById('tr-data').value = hoje();
+  document.getElementById('tr-desc').value = '';
+  openModal('modalTransf');
+}
+
+async function salvarTransf() {
+  try {
+    await api('/api/transferencias', { method: 'POST', body: {
+      conta_origem: document.getElementById('tr-origem').value,
+      conta_destino: document.getElementById('tr-destino').value,
+      valor: document.getElementById('tr-valor').value,
+      data: document.getElementById('tr-data').value,
+      descricao: document.getElementById('tr-desc').value || null,
+    }});
+    toast('Transferência registrada!', 'ok'); closeModal('modalTransf'); loadConta(); loadTransf();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function delTransf(id) {
+  if (!confirm('Excluir esta transferência? Os saldos das duas contas voltam como antes.')) return;
+  try { await api('/api/transferencias/' + id, { method: 'DELETE' }); toast('Excluída.', 'ok'); loadConta(); loadTransf(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+loadCat(); loadContato(); loadConta(); loadTransf();
 </script>
 </body>
 </html>

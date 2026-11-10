@@ -20,7 +20,7 @@
   </div>
 
   <div class="grid cols-4" id="kpis">
-    <div class="card kpi"><div class="label">Saldo atual</div><div class="value" id="k-saldo">—</div><div class="hint">caixa + contas</div></div>
+    <div class="card kpi"><div class="label">Saldo atual</div><div class="value" id="k-saldo">—</div><div class="hint">soma das contas / caixa</div></div>
     <div class="card kpi"><div class="label">A receber (30d)</div><div class="value pos" id="k-receber">—</div><div class="hint" id="k-receber-venc"></div></div>
     <div class="card kpi"><div class="label">A pagar (30d)</div><div class="value neg" id="k-pagar">—</div><div class="hint" id="k-pagar-venc"></div></div>
     <div class="card kpi"><div class="label">Resultado do mês</div><div class="value" id="k-resultado">—</div><div class="hint" id="k-resultado-hint"></div></div>
@@ -60,7 +60,8 @@ async function carregar() {
     const res = document.getElementById('k-resultado');
     res.textContent = money(r.resultado_mes);
     res.className = 'value ' + (r.resultado_mes >= 0 ? 'pos' : 'neg');
-    document.getElementById('k-resultado-hint').textContent = `rec ${moneyShort(r.receita_mes)} · desp ${moneyShort(r.despesa_mes)}`;
+    document.getElementById('k-resultado-hint').textContent = `rec ${moneyShort(r.receita_mes)} · desp ${moneyShort(r.despesa_mes)}`
+      + (r.recorrencias_nao_geradas_mes ? ` · inclui ${r.recorrencias_nao_geradas_mes} recorrência(s) ainda não lançada(s)` : '');
 
     document.getElementById('k-mrr-rec').textContent = money(r.mrr_receita || 0);
     document.getElementById('k-mrr-desp').textContent = money(r.mrr_despesa || 0);
