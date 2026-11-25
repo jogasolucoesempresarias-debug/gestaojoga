@@ -19,11 +19,12 @@
     <a class="btn" href="/api/export/lancamentos.csv">⬇ Exportar CSV</a>
   </div>
 
-  <div class="grid cols-4" id="kpis">
+  <div class="grid cols-5" id="kpis">
     <div class="card kpi"><div class="label">Saldo atual</div><div class="value" id="k-saldo">—</div><div class="hint">soma das contas / caixa</div></div>
     <div class="card kpi"><div class="label">A receber (30d)</div><div class="value pos" id="k-receber">—</div><div class="hint" id="k-receber-venc"></div></div>
     <div class="card kpi"><div class="label">A pagar (30d)</div><div class="value neg" id="k-pagar">—</div><div class="hint" id="k-pagar-venc"></div></div>
-    <div class="card kpi"><div class="label">Resultado do mês</div><div class="value" id="k-resultado">—</div><div class="hint" id="k-resultado-hint"></div></div>
+    <div class="card kpi" title="Só o que entrou e saiu de fato no mês (parcelas com baixa)"><div class="label">Resultado do mês</div><div class="value" id="k-resultado">—</div><div class="hint" id="k-resultado-hint"></div></div>
+    <div class="card kpi" title="Competência: o que foi vendido e gasto no mês, tendo entrado ou não"><div class="label">Provisão do mês</div><div class="value" id="k-provisao">—</div><div class="hint" id="k-provisao-hint"></div></div>
   </div>
 
   <div class="grid cols-3" style="margin-top:16px">
@@ -58,9 +59,13 @@ async function carregar() {
     document.getElementById('k-receber-venc').textContent = r.vencidos_receber > 0 ? `⚠ ${money(r.vencidos_receber)} vencidos` : 'em dia';
     document.getElementById('k-pagar-venc').textContent = r.vencidos_pagar > 0 ? `⚠ ${money(r.vencidos_pagar)} vencidos` : 'em dia';
     const res = document.getElementById('k-resultado');
-    res.textContent = money(r.resultado_mes);
-    res.className = 'value ' + (r.resultado_mes >= 0 ? 'pos' : 'neg');
-    document.getElementById('k-resultado-hint').textContent = `rec ${moneyShort(r.receita_mes)} · desp ${moneyShort(r.despesa_mes)}`
+    res.textContent = money(r.caixa_resultado_mes);
+    res.className = 'value ' + (r.caixa_resultado_mes >= 0 ? 'pos' : 'neg');
+    document.getElementById('k-resultado-hint').textContent = `entrou ${moneyShort(r.caixa_entrou_mes)} · saiu ${moneyShort(r.caixa_saiu_mes)}`;
+    const prov = document.getElementById('k-provisao');
+    prov.textContent = money(r.resultado_mes);
+    prov.className = 'value ' + (r.resultado_mes >= 0 ? 'pos' : 'neg');
+    document.getElementById('k-provisao-hint').textContent = `vendido ${moneyShort(r.receita_mes)} · gasto ${moneyShort(r.despesa_mes)} · com o que ainda não entrou`
       + (r.recorrencias_nao_geradas_mes ? ` · inclui ${r.recorrencias_nao_geradas_mes} recorrência(s) ainda não lançada(s)` : '');
 
     document.getElementById('k-mrr-rec').textContent = money(r.mrr_receita || 0);

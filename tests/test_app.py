@@ -342,3 +342,23 @@ def test_primeira_cobranca_nao_vence_antes_do_inicio(client, server):
     vencs = [r['data_vencimento'] for r in server.q_all(
         "SELECT p.data_vencimento FROM parcelas p JOIN lancamentos l ON l.id = p.lancamento_id WHERE l.contrato_id=%s", (cid,))]
     assert prox.isoformat() in vencs
+
+
+def test_resultado_do_mes_e_caixa_e_provisao_e_competencia(client):
+    """Caso real (11/2026): implantação de 3.000 em 4× com só a 1ª paga. O Resultado do mês
+    conta os 750 que entraram; os 3.000 cheios ficam na Provisão (competência)."""
+    lid = criar_lanc(client, valor_total=3000, num_parcelas=4)
+    p1 = parcelas_de(client, lid)[0]['id']
+    ok(client.post(f'/api/parcelas/{p1}/pagar', json={}))
+    desp_paga = criar_lanc(client, tipo='despesa', valor_total=150)
+    ok(client.post(f"/api/parcelas/{parcelas_de(client, desp_paga)[0]['id']}/pagar", json={}))
+    criar_lanc(client, tipo='despesa', valor_total=75)               # lançada, não paga
+    antiga = criar_lanc(client, valor_total=999,                    # paga no mês passado
+                        data_competencia=add_meses(hoje(), -1).isoformat(),
+                        primeiro_vencimento=add_meses(hoje(), -1).isoformat())
+    ok(client.post(f"/api/parcelas/{parcelas_de(client, antiga)[0]['id']}/pagar",
+                   json={'data_pagamento': add_meses(hoje(), -1).isoformat()}))
+
+    r = ok(client.get('/api/dashboard/resumo'))['resumo']
+    assert (r['caixa_entrou_mes'], r['caixa_saiu_mes'], r['caixa_resultado_mes']) == (750, 150, 600)
+    assert (r['receita_mes'], r['despesa_mes'], r['resultado_mes']) == (3000, 225, 2775)

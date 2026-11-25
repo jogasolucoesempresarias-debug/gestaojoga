@@ -1591,6 +1591,17 @@ def dashboard_resumo():
     receita_mes = receita_lancada + rec_pendente
     despesa_mes = despesa_lancada + desp_pendente
 
+    # Caixa do mês: só o que ENTROU/SAIU de fato (parcelas com baixa no mês). Transferência entre
+    # contas não é entrada nem saída. É este o "Resultado do mês"; o de competência vira Provisão.
+    caixa = q_one("""
+        SELECT COALESCE(SUM(CASE WHEN l.tipo='receita' THEN COALESCE(p.valor_pago, p.valor) END),0) AS entrou,
+               COALESCE(SUM(CASE WHEN l.tipo<>'receita' THEN COALESCE(p.valor_pago, p.valor) END),0) AS saiu
+        FROM parcelas p JOIN lancamentos l ON l.id = p.lancamento_id
+        WHERE p.status='pago' AND p.data_pagamento >= %s AND p.data_pagamento <= %s
+    """, (inicio_mes, fim_mes)) or {}
+    caixa_entrou = float(caixa.get('entrou') or 0)
+    caixa_saiu = float(caixa.get('saiu') or 0)
+
     mrr_receita = round(_mrr('receita'), 2)
     mrr_despesa = round(_mrr('despesa'), 2)
 
@@ -1604,6 +1615,10 @@ def dashboard_resumo():
         'a_pagar_90': pagar(add_months(hoje, 3)),
         'vencidos_receber': round(_previstas(['receita'], date(2000, 1, 1), ontem), 2),
         'vencidos_pagar': round(_previstas(['despesa', 'imposto'], date(2000, 1, 1), ontem), 2),
+        'caixa_entrou_mes': round(caixa_entrou, 2),
+        'caixa_saiu_mes': round(caixa_saiu, 2),
+        'caixa_resultado_mes': round(caixa_entrou - caixa_saiu, 2),
+        # Competência (Provisão): o que foi vendido/gasto no mês, tendo entrado ou não
         'receita_mes': round(receita_mes, 2),
         'despesa_mes': round(despesa_mes, 2),
         'resultado_mes': round(receita_mes - despesa_mes, 2),

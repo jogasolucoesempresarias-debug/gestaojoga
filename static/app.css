@@ -67,6 +67,7 @@ a { color: inherit; text-decoration: none; }
 .grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
 .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
 .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
 .card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 14px; padding: 18px 20px;
@@ -197,7 +198,7 @@ td.num, th.num { text-align: right; font-family: 'JetBrains Mono', monospace; }
   .sidebar { width: 64px; }
   .brand .name, .brand .sub, .nav a span:not(.ico), .sidebar .foot span { display: none; }
   .main { margin-left: 64px; padding: 18px; }
-  .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-5, .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr 1fr; }
 }
 
 /* ── v4: edição/exclusão, modo da recorrência, avisos ── */
@@ -226,7 +227,7 @@ tr.inativo td { opacity: 0.55; }
 .field input:disabled, .field select:disabled { opacity: 0.55; cursor: not-allowed; }
 .grid > * { min-width: 0; }
 @media (max-width: 600px) {
-  .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; }
+  .grid.cols-5, .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; }
   .row2, .row3 { grid-template-columns: 1fr; }
   .page-head > div { max-width: 100%; }
 }
